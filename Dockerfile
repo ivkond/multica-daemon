@@ -7,14 +7,15 @@ ARG NODE_VERSION
 ARG PNPM_VERSION
 ARG INFISICAL_CLI_VERSION
 ARG CODEX_VERSION
-ARG OPENCODE_VERSION
-ARG OPENCODE_SHA256_X64
-ARG OPENCODE_SHA256_ARM64
+ARG OPENCODE_VERSION=
+ARG OPENCODE_SHA256_X64=
+ARG OPENCODE_SHA256_ARM64=
+ARG PI_VERSION=
 
 ENV PATH="/usr/local/lib/nodejs/bin:${PATH}"
 
 RUN set -eu; \
-  test -n "$AGENT" || { printf 'Dockerfile: missing required build arg AGENT; expected codex or opencode\n' >&2; exit 1; }; \
+  test -n "$AGENT" || { printf 'Dockerfile: missing required build arg AGENT; expected codex, opencode, or pi\n' >&2; exit 1; }; \
   test -n "$MULTICA_VERSION" || { printf 'Dockerfile: missing required build arg MULTICA_VERSION\n' >&2; exit 1; }; \
   test -n "$NODE_VERSION" || { printf 'Dockerfile: missing required build arg NODE_VERSION\n' >&2; exit 1; }; \
   test -n "$PNPM_VERSION" || { printf 'Dockerfile: missing required build arg PNPM_VERSION\n' >&2; exit 1; }; \
@@ -25,7 +26,8 @@ RUN set -eu; \
       test -n "$OPENCODE_VERSION" || { printf 'Dockerfile: missing required build arg OPENCODE_VERSION for AGENT=opencode\n' >&2; exit 1; }; \
       test -n "$OPENCODE_SHA256_X64" || { printf 'Dockerfile: missing required build arg OPENCODE_SHA256_X64 for AGENT=opencode\n' >&2; exit 1; }; \
       test -n "$OPENCODE_SHA256_ARM64" || { printf 'Dockerfile: missing required build arg OPENCODE_SHA256_ARM64 for AGENT=opencode\n' >&2; exit 1; } ;; \
-    *) printf 'Dockerfile: unsupported AGENT "%s"; expected codex or opencode\n' "$AGENT" >&2; exit 1 ;; \
+    pi) test -n "$PI_VERSION" || { printf 'Dockerfile: missing required build arg PI_VERSION for AGENT=pi\n' >&2; exit 1; } ;; \
+    *) printf 'Dockerfile: unsupported AGENT "%s"; expected codex, opencode, or pi\n' "$AGENT" >&2; exit 1 ;; \
   esac
 
 RUN set -eux; \
@@ -87,6 +89,7 @@ RUN chmod 755 /usr/local/bin/entrypoint.sh \
 RUN set -eux; \
   case "$AGENT" in \
     codex) npm install -g "@openai/codex@${CODEX_VERSION}" && codex --version ;; \
+    pi) npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}" && pi --version ;; \
     opencode) \
       case "${TARGETARCH:-amd64}" in \
         amd64) opencode_asset="opencode-linux-x64.tar.gz"; opencode_sha256="$OPENCODE_SHA256_X64" ;; \
@@ -100,15 +103,17 @@ RUN set -eux; \
       install -m 755 /tmp/opencode/opencode /usr/local/bin/opencode || { printf 'Dockerfile: failed to install OpenCode binary to /usr/local/bin/opencode\n' >&2; exit 1; }; \
       rm -rf /tmp/opencode /tmp/opencode.tar.gz; \
       opencode --version ;; \
-    *) printf 'Dockerfile: unsupported AGENT "%s"; expected codex or opencode\n' "$AGENT" >&2; exit 1 ;; \
+    *) printf 'Dockerfile: unsupported AGENT "%s"; expected codex, opencode, or pi\n' "$AGENT" >&2; exit 1 ;; \
   esac
 
 ENV AGENT=$AGENT
+ENV MULTICA_IMAGE_AGENT=$AGENT
 ENV MULTICA_VERSION=$MULTICA_VERSION
 ENV NODE_VERSION=$NODE_VERSION
 ENV PNPM_VERSION=$PNPM_VERSION
 ENV INFISICAL_CLI_VERSION=$INFISICAL_CLI_VERSION
 ENV CODEX_VERSION=$CODEX_VERSION
 ENV OPENCODE_VERSION=$OPENCODE_VERSION
+ENV PI_VERSION=$PI_VERSION
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

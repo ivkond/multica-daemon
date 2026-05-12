@@ -76,6 +76,29 @@ Optional fields:
 
 - `GITHUB_TOKEN` for private GitHub HTTPS repo clones.
 
+### Pi
+
+```dotenv
+MULTICA_TOKEN=mul_replace_with_runtime_token
+PI_AUTH_JSON_B64=base64_encoded_pi_auth_json
+GITHUB_TOKEN=github_pat_or_classic_token_with_read_repo_access
+```
+
+Required fields:
+
+- `MULTICA_TOKEN`
+- `PI_AUTH_JSON_B64`
+
+Optional fields:
+
+- `GITHUB_TOKEN` for private GitHub HTTPS repo clones.
+
+The runtime normalizes `PI_AUTH_JSON_B64` from Infisical to:
+
+```text
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
+```
+
 ## Codex Credential Handling
 
 Codex uses ChatGPT subscription credentials.
@@ -104,6 +127,22 @@ Codex config:
 forced_login_method = "chatgpt"
 cli_auth_credentials_store = "file"
 ```
+
+## Pi Credential Handling
+
+Pi uses an existing Pi Coding Agent `auth.json` credential.
+
+Bootstrap happens outside CI/CD and outside the runtime container. No interactive `/login` is performed inside the container.
+
+Runtime behavior:
+
+- build with pinned `PI_VERSION=0.74.0` and npm package `@earendil-works/pi-coding-agent@${PI_VERSION}`;
+- set `PI_CODING_AGENT_DIR=/data/pi/agent`;
+- create `/data/pi/agent` with restrictive permissions;
+- decode Infisical `PI_AUTH_JSON_B64` from `PI_AUTH_JSON_B64_FROM_SECRET_STORE` only if `/data/pi/agent/auth.json` is missing;
+- write `/data/pi/agent/auth.json` with restrictive permissions;
+- preserve existing `/data/pi/agent/auth.json` on the Railway volume;
+- do not run interactive `/login` in the container.
 
 ## Multica Token Handling
 
@@ -155,6 +194,8 @@ Forbidden:
 - `MULTICA_TOKEN_FROM_SECRET_STORE`;
 - `CODEX_AUTH_JSON_B64`;
 - `CODEX_AUTH_JSON_B64_FROM_SECRET_STORE`;
+- `PI_AUTH_JSON_B64`;
+- `PI_AUTH_JSON_B64_FROM_SECRET_STORE`;
 - `GITHUB_TOKEN`;
 - `GITHUB_TOKEN_FROM_SECRET_STORE`;
 - decoded `auth.json`;
@@ -183,7 +224,7 @@ If a runtime is suspected compromised:
 1. Stop the Railway service.
 2. Revoke the runtime Infisical token.
 3. Revoke or rotate Multica personal token.
-4. Rotate Codex credential by creating a fresh `auth.json`.
+4. Rotate Codex or Pi credential by creating a fresh `auth.json`.
 5. Create a new Infisical secret path for the replacement runtime.
 6. Attach a fresh Railway volume if workspace trust is uncertain.
 

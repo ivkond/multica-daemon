@@ -72,8 +72,50 @@ setup_opencode() {
   opencode --version
 }
 
+setup_pi() {
+  local auth_path
+  local pi_auth_json_b64
+  local tmp_auth
+
+  require_env "PI_CODING_AGENT_DIR"
+
+  auth_path="${PI_CODING_AGENT_DIR}/auth.json"
+  pi_auth_json_b64=""
+  if [[ ! -f "$auth_path" ]]; then
+    require_env "PI_AUTH_JSON_B64_FROM_SECRET_STORE"
+    pi_auth_json_b64="$PI_AUTH_JSON_B64_FROM_SECRET_STORE"
+  fi
+
+  unset PI_AUTH_JSON_B64_FROM_SECRET_STORE
+
+  mkdir -p "$PI_CODING_AGENT_DIR"
+  chmod 700 "$PI_CODING_AGENT_DIR"
+
+  if [[ ! -f "$auth_path" ]]; then
+    tmp_auth="$(mktemp "${PI_CODING_AGENT_DIR}/auth.json.tmp.XXXXXX")"
+    chmod 600 "$tmp_auth"
+    if ! printf '%s' "$pi_auth_json_b64" | base64 -d > "$tmp_auth"; then
+      rm -f "$tmp_auth"
+      unset pi_auth_json_b64
+      die "failed to decode Pi auth JSON"
+    fi
+
+    unset pi_auth_json_b64
+    if ! jq empty "$tmp_auth"; then
+      rm -f "$tmp_auth"
+      die "decoded Pi auth JSON is invalid"
+    fi
+
+    mv "$tmp_auth" "$auth_path"
+  fi
+
+  chmod 600 "$auth_path"
+
+  pi --version
+}
+
 if [[ "$#" -ne 1 ]]; then
-  die "usage: setup_agent.sh codex|opencode"
+  die "usage: setup_agent.sh codex|opencode|pi"
 fi
 
 agent="$1"
@@ -84,6 +126,9 @@ case "$agent" in
     ;;
   opencode)
     setup_opencode
+    ;;
+  pi)
+    setup_pi
     ;;
   *)
     die "unsupported AGENT: ${agent}"

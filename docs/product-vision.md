@@ -20,10 +20,11 @@ The user wants Multica tasks to run outside their laptop:
 
 ## MVP Boundaries
 
-The MVP supports two agent runtimes:
+The MVP supports three agent runtimes:
 
 - `codex`
 - `opencode`
+- `pi`
 
 One Docker image contains one agent CLI. The selected agent is controlled by `AGENT`.
 
@@ -36,6 +37,7 @@ The MVP does not include:
 - Secret providers other than Infisical.
 - API key fallback for Codex.
 - Provider matrix for OpenCode.
+- Interactive Pi `/login` inside the container.
 - Test automation.
 
 ## Deployment Model
@@ -46,6 +48,7 @@ One Railway service corresponds to one named runtime:
 agent-codex-1
 agent-codex-2
 agent-opencode-1
+agent-pi-1
 ```
 
 Each runtime has:
@@ -63,10 +66,12 @@ The MVP is successful when:
 
 - the Docker image builds for `AGENT=codex`;
 - the Docker image builds for `AGENT=opencode`;
+- the Docker image builds for `AGENT=pi` with pinned `PI_VERSION=0.74.0`;
 - the Railway service fetches secrets from Infisical on startup;
-- Multica CLI authenticates with `multica_token`;
+- Multica CLI authenticates with `MULTICA_TOKEN`;
 - the Codex runtime uses a ChatGPT subscription credential from Infisical;
 - the OpenCode runtime starts with default free provider behavior;
+- the Pi runtime restores `PI_AUTH_JSON_B64` from Infisical to `/data/pi/agent/auth.json` when missing, preserves an existing auth file, and sets `PI_CODING_AGENT_DIR=/data/pi/agent`;
 - `multica daemon start --foreground` runs as the main container process;
 - Railway healthcheck returns `200` only when the daemon is running.
 

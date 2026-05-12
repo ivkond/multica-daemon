@@ -36,21 +36,23 @@ ARG PNPM_VERSION
 ARG INFISICAL_CLI_VERSION
 ```
 
-Required when `AGENT=codex`:
+Optional agent build args are declared with empty defaults so non-selected agents may leave them empty:
 
 ```dockerfile
-ARG CODEX_VERSION
+ARG CODEX_VERSION=
+ARG OPENCODE_VERSION=
+ARG OPENCODE_SHA256_X64=
+ARG OPENCODE_SHA256_ARM64=
+ARG PI_VERSION=
 ```
 
-Required when `AGENT=opencode`:
+Required when `AGENT=codex`: `CODEX_VERSION` must be non-empty.
 
-```dockerfile
-ARG OPENCODE_VERSION
-ARG OPENCODE_SHA256_X64
-ARG OPENCODE_SHA256_ARM64
-```
+Required when `AGENT=opencode`: `OPENCODE_VERSION`, `OPENCODE_SHA256_X64`, and `OPENCODE_SHA256_ARM64` must be non-empty.
 
-Build must fail-fast when required args are empty or when `AGENT` is unsupported.
+Required when `AGENT=pi`: `PI_VERSION` must be non-empty.
+
+Build must fail-fast when the selected agent version arg is empty or when `AGENT` is unsupported. Supported `AGENT` values are `codex`, `opencode`, and `pi`.
 
 ## Runtime Env Export
 
@@ -58,15 +60,17 @@ Build args are persisted as image env for logging and validation:
 
 ```dockerfile
 ENV AGENT=$AGENT
+ENV MULTICA_IMAGE_AGENT=$AGENT
 ENV MULTICA_VERSION=$MULTICA_VERSION
 ENV NODE_VERSION=$NODE_VERSION
 ENV PNPM_VERSION=$PNPM_VERSION
 ENV INFISICAL_CLI_VERSION=$INFISICAL_CLI_VERSION
 ENV CODEX_VERSION=$CODEX_VERSION
 ENV OPENCODE_VERSION=$OPENCODE_VERSION
+ENV PI_VERSION=$PI_VERSION
 ```
 
-These env values are not used to install software at runtime.
+These env values are not used to install software at runtime. `MULTICA_IMAGE_AGENT` records the agent baked into the image; entrypoint validation must fail clearly if runtime `AGENT` differs from `MULTICA_IMAGE_AGENT`.
 
 ## System Dependencies
 
@@ -124,7 +128,7 @@ infisical --version
 
 ## Multica Install
 
-The Dockerfile installs Multica from official GitHub release artifacts using exact `MULTICA_VERSION`.
+The Dockerfile build steps install Multica from official GitHub release artifacts using exact `MULTICA_VERSION`. Runtime script `scripts/setup_multica.sh` is not invoked during build; it remains runtime-only configuration and authentication.
 
 The Multica release asset URL pattern is:
 
@@ -140,18 +144,15 @@ Rules:
 - binary must end up on `PATH`;
 - build verifies `multica --version`.
 
-The implementation must encode the supported release asset naming for Linux amd64 in the script and fail clearly if the asset cannot be resolved.
+The implementation must encode the supported release asset naming for Linux amd64 in the build install path and fail clearly if the asset cannot be resolved.
 
 ## Agent Install
 
 One image contains one agent CLI.
 
-The Dockerfile installs the selected agent inline during build, based on the
-`AGENT` build argument.
+The Dockerfile installs the selected agent inline during build, based on the `AGENT` build argument and the selected non-empty version/checksum build args.
 
-`scripts/setup_agent.sh` is runtime configuration only. The entrypoint calls it
-after fetching Infisical state so it can configure the selected agent for runtime
-credentials and state; it is not used for build-time installation.
+`scripts/setup_agent.sh` is runtime configuration only. The entrypoint calls it after fetching Infisical state so it can configure the selected agent for runtime credentials and state; it is not used for build-time installation.
 
 ### Codex
 
@@ -200,11 +201,25 @@ Build verifies:
 opencode --version
 ```
 
+### Pi
+
+Pi is installed through the pinned npm package path:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent@${PI_VERSION}
+```
+
+Build verifies:
+
+```bash
+pi --version
+```
+
 ## Reproducibility Boundaries
 
 The MVP pins the Debian base image by digest and verifies OpenCode release assets by SHA-256 from GitHub release metadata.
 
-Residual risk: Debian package versions from the pinned base image repositories, Node.js tarball, Multica release tarball, and npm-installed Codex and Infisical packages are not yet checksum-pinned in this task. Pinning every Debian package version is intentionally deferred because Bookworm security updates make strict package pins brittle for Railway builds.
+Residual risk: Debian package versions from the pinned base image repositories, Node.js tarball, Multica release tarball, and npm-installed Codex, Pi, and Infisical packages are not yet checksum-pinned in this task. Pinning every Debian package version is intentionally deferred because Bookworm security updates make strict package pins brittle for Railway builds.
 
 ## Runtime User
 
@@ -226,4 +241,4 @@ The Dockerfile copies scripts into the image and sets:
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 ```
 
-The image must not require secrets during build.
+The image must not require secrets during build, including Infisical-provided Pi auth such as `PI_AUTH_JSON_B64_FROM_SECRET_STORE`.

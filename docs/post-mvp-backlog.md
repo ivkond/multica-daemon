@@ -6,10 +6,9 @@ These ideas are outside the MVP. They can turn one reliable daemon runtime into 
 
 ## 1. More Agents
 
-Candidate agents:
+Candidate agents beyond Codex, OpenCode, and Pi:
 
 - `kilocode`
-- `pi`
 - `deepseek-cli`
 - `mistral-vibe`
 - `cursor`
@@ -128,13 +127,15 @@ docker run --rm multica-daemon:codex multica --version
 docker run --rm multica-daemon:codex codex --version
 docker run --rm multica-daemon:opencode multica --version
 docker run --rm multica-daemon:opencode opencode --version
+docker run --rm multica-daemon:pi multica --version
+docker run --rm multica-daemon:pi pi --version
 ```
 
 Definition of Done:
 
 - no-secret checks run in CI;
 - runtime checks are separated from build checks;
-- CI matrix covers `AGENT=codex` and `AGENT=opencode`;
+- CI matrix covers `AGENT=codex`, `AGENT=opencode`, and `AGENT=pi` with `PI_VERSION=0.74.0`;
 - optional shell test framework is introduced only after explicit decision.
 
 ## 8. Runtime Diagnostics

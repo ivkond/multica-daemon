@@ -10,6 +10,7 @@ This repo builds and deploys a small runtime service. It connects to an existing
 
 - `codex` - Codex CLI with ChatGPT subscription credentials loaded from Infisical.
 - `opencode` - OpenCode CLI with default free provider behavior.
+- `pi` - Pi CLI with provider credentials restored from an Infisical-backed `auth.json` bundle.
 
 Each deployment is a separate named runtime:
 
@@ -17,6 +18,7 @@ Each deployment is a separate named runtime:
 agent-codex-1
 agent-codex-2
 agent-opencode-1
+agent-pi-1
 ```
 
 Use a separate Railway service, volume, daemon id, and Infisical secret path for each runtime.
@@ -37,10 +39,10 @@ Your Multica backend and frontend can live anywhere: Railway, a VPS, Vercel, ano
 
 ## Runtime Files
 
-- `Dockerfile` builds the selected `codex` or `opencode` runtime image and installs the Infisical CLI.
+- `Dockerfile` builds the selected `codex`, `opencode`, or `pi` runtime image and installs the Infisical CLI.
 - `scripts/entrypoint.sh` validates environment, prepares `/data`, fetches Infisical secrets, runs setup scripts, starts the health proxy, and execs the daemon.
 - `scripts/setup_multica.sh` configures Multica CLI URLs and token auth.
-- `scripts/setup_agent.sh` configures Codex or OpenCode runtime state.
+- `scripts/setup_agent.sh` configures Codex, OpenCode, or Pi runtime state.
 - `scripts/health_proxy.py` exposes Railway `/health` on `$PORT`.
 - `railway.json` configures Dockerfile build and Railway `/health` healthcheck only.
 
@@ -57,6 +59,8 @@ You need:
 
 For Codex, you also need a prepared `CODEX_HOME/auth.json` created through a ChatGPT subscription login. The container does not perform interactive OAuth.
 
+For Pi, you also need a prepared `~/.pi/agent/auth.json` created through Pi login or API-key configuration. The container restores this bundle from Infisical and does not perform interactive login.
+
 Do not put secret values in committed files. Store only the Infisical bootstrap token as a sealed Railway variable, and store runtime secrets in Infisical.
 
 ## Infisical Setup
@@ -66,6 +70,7 @@ Create one Infisical path per runtime, for example:
 ```text
 /multica-daemon/agent-codex-1
 /multica-daemon/agent-opencode-1
+/multica-daemon/agent-pi-1
 ```
 
 For a Codex runtime, store:
@@ -93,6 +98,17 @@ infisical secrets set MULTICA_TOKEN=dummy-multica-token \
   --env=prod \
   --path=/multica-daemon/agent-opencode-1
 ```
+
+For a Pi runtime, store:
+
+```dotenv
+MULTICA_TOKEN=mul_replace_with_runtime_token
+PI_AUTH_JSON_B64=base64_encoded_pi_auth_json
+# Optional, required only when workspace repos are private GitHub HTTPS repos.
+GITHUB_TOKEN=github_pat_or_classic_token_with_read_repo_access
+```
+
+Pi stores provider credentials in `~/.pi/agent/auth.json`. The runtime restores the bundle to `/data/pi/agent/auth.json` and sets `PI_CODING_AGENT_DIR=/data/pi/agent` so Pi config and state live on the persistent volume.
 
 For private GitHub repos, add a fine-grained GitHub PAT with repository `Contents: Read-only` access:
 
@@ -143,7 +159,7 @@ MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
 
-`MULTICA_WORKSPACES_ROOT` must be a child path under `/data`, for example `/data/workspaces`. Startup rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, and descendants of those runtime state paths.
+`MULTICA_WORKSPACES_ROOT` must be a child path under `/data`, for example `/data/workspaces`. Startup rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, and descendants of those runtime state paths.
 
 If your Multica backend and frontend are in the same Railway project, you can use Railway reference variables:
 
@@ -208,6 +224,27 @@ docker build \
   -t multica-daemon:opencode .
 ```
 
+For Pi:
+
+```dotenv
+AGENT=pi
+MULTICA_VERSION=v0.2.27
+NODE_VERSION=22.15.0
+PNPM_VERSION=10.10.0
+INFISICAL_CLI_VERSION=0.43.82
+PI_VERSION=0.74.0
+```
+
+Pi runtime variables:
+
+```dotenv
+AGENT=pi
+INFISICAL_SECRET_PATH=/multica-daemon/agent-pi-1
+MULTICA_DAEMON_ID=agent-pi-1
+MULTICA_DAEMON_DEVICE_NAME=agent-pi-1
+MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
+```
+
 ## Codex Runtime
 
 Codex uses ChatGPT subscription credentials, not `OPENAI_API_KEY`.
@@ -232,25 +269,42 @@ OpenCode is installed from pinned official `anomalyco/opencode` GitHub release a
 
 Provider-specific OpenCode secrets can be added later without changing the Multica daemon contract.
 
+## Pi Runtime
+
+Pi is installed from the pinned npm package `@earendil-works/pi-coding-agent`.
+
+Prepare credentials outside CI/CD:
+
+```bash
+export PI_CODING_AGENT_DIR=/tmp/pi-bootstrap/agent
+pi
+# Run /login and select the intended provider, or configure API-key auth.
+base64 -w 0 /tmp/pi-bootstrap/agent/auth.json
+```
+
+Store the base64 output in Infisical as `PI_AUTH_JSON_B64`.
+
+At startup, the container writes `/data/pi/agent/auth.json` only if the file does not already exist. After the first start, the Railway Volume becomes the source of truth so Pi can preserve refreshed credentials and local state.
+
 ## Environment Variables
 
 Required runtime variables:
 
-| Variable | Purpose |
-| --- | --- |
-| `AGENT` | `codex` or `opencode` |
-| `INFISICAL_TOKEN` | Read-only Infisical service token or machine identity access token |
-| `INFISICAL_PROJECT_ID` | Infisical project id |
-| `INFISICAL_ENV` | Infisical environment slug, for example `prod` |
-| `INFISICAL_SECRET_PATH` | Infisical folder path for this runtime |
-| `INFISICAL_API_URL` | Infisical API URL, defaults to `https://app.infisical.com/api` |
-| `MULTICA_SERVER_URL` | Multica backend URL |
-| `MULTICA_APP_URL` | Multica frontend URL |
-| `MULTICA_DAEMON_ID` | Stable daemon identity |
-| `MULTICA_DAEMON_DEVICE_NAME` | Human-readable device name |
-| `MULTICA_AGENT_RUNTIME_NAME` | Runtime display name in Multica |
-| `MULTICA_WORKSPACES_ROOT` | Usually `/data/workspaces` |
-| `PORT` | Railway healthcheck port |
+| Variable                     | Purpose                                                            |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `AGENT`                      | `codex`, `opencode`, or `pi`                                       |
+| `INFISICAL_TOKEN`            | Read-only Infisical service token or machine identity access token |
+| `INFISICAL_PROJECT_ID`       | Infisical project id                                               |
+| `INFISICAL_ENV`              | Infisical environment slug, for example `prod`                     |
+| `INFISICAL_SECRET_PATH`      | Infisical folder path for this runtime                             |
+| `INFISICAL_API_URL`          | Infisical API URL, defaults to `https://app.infisical.com/api`     |
+| `MULTICA_SERVER_URL`         | Multica backend URL                                                |
+| `MULTICA_APP_URL`            | Multica frontend URL                                               |
+| `MULTICA_DAEMON_ID`          | Stable daemon identity                                             |
+| `MULTICA_DAEMON_DEVICE_NAME` | Human-readable device name                                         |
+| `MULTICA_AGENT_RUNTIME_NAME` | Runtime display name in Multica                                    |
+| `MULTICA_WORKSPACES_ROOT`    | Usually `/data/workspaces`                                         |
+| `PORT`                       | Railway healthcheck port                                           |
 
 Multica daemon options pass through environment variables. Examples:
 
@@ -306,6 +360,10 @@ Check that `/data/codex/auth.json` exists and was created with `codex login --de
 
 Check Railway logs for the startup check `opencode --version`. Multica daemon discovers agent CLIs through `PATH`.
 
+**Pi runtime starts but Pi tasks fail**
+
+Check that `/data/pi/agent/auth.json` exists, has `600` permissions, and was created from the intended Pi login or API-key configuration. Confirm the selected Pi provider/model works locally before encoding the file for Infisical.
+
 **Daemon does not appear in Multica**
 
 Check `MULTICA_SERVER_URL`, `MULTICA_DAEMON_ID`, `MULTICA_DAEMON_DEVICE_NAME`, `MULTICA_AGENT_RUNTIME_NAME`, and the Infisical secret `MULTICA_TOKEN`.
@@ -334,10 +392,10 @@ curl -fsS http://127.0.0.1:${PORT}/health
 
 ## What You Can Build Next
 
-Once one Codex or OpenCode runtime is stable, the same pattern can expand into:
+Once one Codex, OpenCode, or Pi runtime is stable, the same pattern can expand into:
 
 - more named daemon services;
-- more agent CLIs;
+- additional agent CLIs beyond Codex, OpenCode, and Pi;
 - provider-specific OpenCode profiles;
 - alternative secret providers;
 - non-root hardening;

@@ -5,6 +5,7 @@ set +x
 readonly DATA_ROOT="/data"
 readonly DEFAULT_CODEX_HOME="/data/codex"
 readonly DEFAULT_OPENCODE_HOME="/data/opencode"
+readonly DEFAULT_PI_CODING_AGENT_DIR="/data/pi/agent"
 readonly INFISICAL_RETRY_COUNT=3
 readonly INFISICAL_RETRY_DELAY_SECONDS=2
 
@@ -25,6 +26,7 @@ require_env() {
 }
 
 require_env "AGENT"
+require_env "MULTICA_IMAGE_AGENT"
 require_env "INFISICAL_TOKEN"
 require_env "INFISICAL_PROJECT_ID"
 require_env "INFISICAL_ENV"
@@ -38,12 +40,16 @@ require_env "MULTICA_WORKSPACES_ROOT"
 require_env "PORT"
 
 case "$AGENT" in
-  codex | opencode)
+  codex | opencode | pi)
     ;;
   *)
     die "unsupported AGENT: ${AGENT}"
     ;;
 esac
+
+if [[ "$AGENT" != "$MULTICA_IMAGE_AGENT" ]]; then
+  die "runtime AGENT (${AGENT}) does not match image agent (${MULTICA_IMAGE_AGENT})"
+fi
 
 if [[ "$AGENT" == "codex" ]]; then
   unset OPENAI_API_KEY
@@ -53,6 +59,7 @@ fi
 export HOME="/data/home"
 export CODEX_HOME="$DEFAULT_CODEX_HOME"
 export OPENCODE_HOME="$DEFAULT_OPENCODE_HOME"
+export PI_CODING_AGENT_DIR="$DEFAULT_PI_CODING_AGENT_DIR"
 export MULTICA_WORKSPACES_ROOT="${MULTICA_WORKSPACES_ROOT}"
 
 normalized_workspaces_root="$(realpath -m -- "$MULTICA_WORKSPACES_ROOT")"
@@ -66,17 +73,18 @@ case "$normalized_workspaces_root" in
 esac
 
 case "$normalized_workspaces_root" in
-  /data/home | /data/home/* | /data/codex | /data/codex/* | /data/opencode | /data/opencode/*)
-    die "MULTICA_WORKSPACES_ROOT must not overlap runtime state paths: /data/home, /data/codex, /data/opencode"
+  /data/home | /data/home/* | /data/codex | /data/codex/* | /data/opencode | /data/opencode/* | /data/pi | /data/pi/*)
+    die "MULTICA_WORKSPACES_ROOT must not overlap runtime state paths: /data/home, /data/codex, /data/opencode, /data/pi"
     ;;
 esac
 
-mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME"
-chmod 700 "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME"
+mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "$PI_CODING_AGENT_DIR"
+chmod 700 "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR"
 [[ -w "$HOME" ]] || die "HOME is not writable"
 [[ -w "$MULTICA_WORKSPACES_ROOT" ]] || die "MULTICA_WORKSPACES_ROOT is not writable"
 [[ -w "$CODEX_HOME" ]] || die "CODEX_HOME is not writable"
 [[ -w "$OPENCODE_HOME" ]] || die "OPENCODE_HOME is not writable"
+[[ -w "$PI_CODING_AGENT_DIR" ]] || die "PI_CODING_AGENT_DIR is not writable"
 
 command -v infisical >/dev/null 2>&1 || die "infisical CLI is required"
 command -v jq >/dev/null 2>&1 || die "jq is required"
@@ -127,6 +135,9 @@ fi
 if ! CODEX_AUTH_JSON_B64_FROM_SECRET_STORE="$(printf '%s' "$infisical_response" | extract_secret "CODEX_AUTH_JSON_B64" "codex_auth_json_b64")"; then
   die "Infisical export response is not valid JSON"
 fi
+if ! PI_AUTH_JSON_B64_FROM_SECRET_STORE="$(printf '%s' "$infisical_response" | extract_secret "PI_AUTH_JSON_B64" "pi_auth_json_b64")"; then
+  die "Infisical export response is not valid JSON"
+fi
 if ! GITHUB_TOKEN_FROM_SECRET_STORE="$(printf '%s' "$infisical_response" | extract_secret "GITHUB_TOKEN" "github_token")"; then
   die "Infisical export response is not valid JSON"
 fi
@@ -134,6 +145,9 @@ fi
 [[ -n "$MULTICA_TOKEN_FROM_SECRET_STORE" ]] || die "Infisical secret is missing MULTICA_TOKEN"
 if [[ "$AGENT" == "codex" && -z "$CODEX_AUTH_JSON_B64_FROM_SECRET_STORE" ]]; then
   die "Infisical secret is missing CODEX_AUTH_JSON_B64 for codex"
+fi
+if [[ "$AGENT" == "pi" && -z "$PI_AUTH_JSON_B64_FROM_SECRET_STORE" ]]; then
+  die "Infisical secret is missing PI_AUTH_JSON_B64 for pi"
 fi
 
 configure_github_credentials() {
@@ -176,12 +190,19 @@ MULTICA_TOKEN_FROM_SECRET_STORE="$MULTICA_TOKEN_FROM_SECRET_STORE" /usr/local/bi
 unset MULTICA_TOKEN_FROM_SECRET_STORE
 
 log "running agent setup"
-if [[ "$AGENT" == "codex" ]]; then
-  CODEX_AUTH_JSON_B64_FROM_SECRET_STORE="$CODEX_AUTH_JSON_B64_FROM_SECRET_STORE" /usr/local/bin/setup_agent.sh "$AGENT"
-else
-  /usr/local/bin/setup_agent.sh "$AGENT"
-fi
+case "$AGENT" in
+  codex)
+    CODEX_AUTH_JSON_B64_FROM_SECRET_STORE="$CODEX_AUTH_JSON_B64_FROM_SECRET_STORE" /usr/local/bin/setup_agent.sh "$AGENT"
+    ;;
+  pi)
+    PI_AUTH_JSON_B64_FROM_SECRET_STORE="$PI_AUTH_JSON_B64_FROM_SECRET_STORE" /usr/local/bin/setup_agent.sh "$AGENT"
+    ;;
+  opencode)
+    /usr/local/bin/setup_agent.sh "$AGENT"
+    ;;
+esac
 unset CODEX_AUTH_JSON_B64_FROM_SECRET_STORE
+unset PI_AUTH_JSON_B64_FROM_SECRET_STORE
 
 unset INFISICAL_PROJECT_ID
 unset INFISICAL_ENV

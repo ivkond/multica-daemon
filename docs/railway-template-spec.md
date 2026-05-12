@@ -46,11 +46,18 @@ OPENCODE_SHA256_X64=d27d3c85183a7bd2df4506484a2f508d1897962063b7ccc8466705b49396
 OPENCODE_SHA256_ARM64=2ffa63bb6115d7aa193cb1f6fa766eb79e1b399776871a624935a752e4461105
 ```
 
-`AGENT` must be:
+Required for Pi:
+
+```dotenv
+PI_VERSION=0.74.0
+```
+
+`AGENT` supported values are:
 
 ```text
 codex
 opencode
+pi
 ```
 
 ## Runtime Variables
@@ -101,11 +108,12 @@ The volume stores:
 - Multica CLI state under `/data/home`;
 - workspaces under `/data/workspaces`;
 - Codex state under `/data/codex`;
-- OpenCode state under `/data/opencode`.
+- OpenCode state under `/data/opencode`;
+- Pi state under `/data/pi`.
 
 Each named runtime needs its own volume.
 
-`MULTICA_WORKSPACES_ROOT` must be a child path under `/data`, for example `/data/workspaces`. Startup validation rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, and descendants of those runtime state paths.
+`MULTICA_WORKSPACES_ROOT` must be a child path under `/data`, for example `/data/workspaces`. Startup validation rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, `/data/pi/agent`, and descendants of those runtime state paths.
 
 ## Healthcheck
 
@@ -142,6 +150,16 @@ INFISICAL_SECRET_PATH=/multica-daemon/agent-opencode-1
 MULTICA_DAEMON_ID=agent-opencode-1
 MULTICA_DAEMON_DEVICE_NAME=agent-opencode-1
 MULTICA_AGENT_RUNTIME_NAME=OpenCode Runtime 1
+```
+
+Pi runtime:
+
+```dotenv
+AGENT=pi
+INFISICAL_SECRET_PATH=/multica-daemon/agent-pi-1
+MULTICA_DAEMON_ID=agent-pi-1
+MULTICA_DAEMON_DEVICE_NAME=agent-pi-1
+MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
 ```
 
 ## Replicas

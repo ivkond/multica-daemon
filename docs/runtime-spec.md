@@ -40,11 +40,14 @@ MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
 
-`AGENT` must be either:
+`AGENT` must match `MULTICA_IMAGE_AGENT`, the agent baked into the image at build time. If `MULTICA_IMAGE_AGENT` is unset or differs from runtime `AGENT`, startup must fail clearly before Infisical access or setup scripts run.
+
+`AGENT` supported values are:
 
 ```text
 codex
 opencode
+pi
 ```
 
 ## Volume Layout
@@ -62,6 +65,8 @@ Runtime directories:
 /data/workspaces
 /data/codex
 /data/opencode
+/data/pi
+/data/pi/agent
 ```
 
 Environment:
@@ -71,9 +76,10 @@ HOME=/data/home
 MULTICA_WORKSPACES_ROOT=/data/workspaces
 CODEX_HOME=/data/codex
 OPENCODE_HOME=/data/opencode
+PI_CODING_AGENT_DIR=/data/pi/agent
 ```
 
-`MULTICA_WORKSPACES_ROOT` must resolve to a child path under `/data`, such as `/data/workspaces`. Startup rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, and descendants of those runtime state paths so workspaces cannot collide with CLI state.
+`MULTICA_WORKSPACES_ROOT` must resolve to a child path under `/data`, such as `/data/workspaces`. Startup rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, `/data/pi/agent`, and descendants of those runtime state paths so workspaces cannot collide with CLI state.
 
 Permissions:
 
@@ -82,10 +88,15 @@ chmod 700 /data/home
 chmod 700 /data/workspaces
 chmod 700 /data/codex
 chmod 700 /data/opencode
+chmod 700 /data/pi
+chmod 700 /data/pi/agent
 chmod 600 /data/codex/auth.json
+chmod 600 /data/pi/agent/auth.json
 ```
 
 `/data/codex/auth.json` exists only for `AGENT=codex`.
+
+`/data/pi/agent/auth.json` exists only for `AGENT=pi`.
 
 ## Multica Daemon Env Pass-Through
 
@@ -142,7 +153,8 @@ The proxy may be implemented with Python stdlib because `python3` is part of the
 Minimal startup validation:
 
 - required env variables are set;
-- `MULTICA_WORKSPACES_ROOT` resolves under `/data` and does not overlap `/data/home`, `/data/codex`, or `/data/opencode`;
+- runtime `AGENT` matches image-baked `MULTICA_IMAGE_AGENT`;
+- `MULTICA_WORKSPACES_ROOT` resolves under `/data` and does not overlap `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, or `/data/pi/agent`;
 - `/data` directories exist and are writable;
 - Infisical export succeeds;
 - selected secret fields are present;
@@ -162,6 +174,15 @@ For OpenCode:
 
 - no provider API key is required in MVP;
 - only `opencode --version` is required.
+
+For Pi:
+
+- `PI_CODING_AGENT_DIR` is set to `/data/pi/agent`;
+- existing `/data/pi/agent/auth.json` is preserved and remains the source of truth after first start;
+- `/data/pi/agent/auth.json` is created from Infisical only if missing;
+- decoded Pi auth JSON is validated before it is moved into place;
+- `PI_AUTH_JSON_B64` is required in Infisical;
+- `pi --version` succeeds.
 
 ## Failure Behavior
 

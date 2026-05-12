@@ -30,15 +30,16 @@ Responsibility: runtime orchestration.
 
 Steps:
 
-1. Validate required runtime env.
+1. Validate required runtime env, including that `AGENT` matches image-baked `MULTICA_IMAGE_AGENT`.
 2. Export runtime paths:
    ```bash
    export HOME=/data/home
    export MULTICA_WORKSPACES_ROOT="${MULTICA_WORKSPACES_ROOT}"
    export CODEX_HOME=/data/codex
    export OPENCODE_HOME=/data/opencode
+   export PI_CODING_AGENT_DIR=/data/pi/agent
    ```
-3. Normalize `MULTICA_WORKSPACES_ROOT` and reject `/data`, `/data/home`, `/data/codex`, `/data/opencode`, and descendants of those runtime state paths.
+3. Normalize `MULTICA_WORKSPACES_ROOT` and reject `/data`, `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, `/data/pi/agent`, and descendants of those runtime state paths.
 4. Create runtime directories.
 5. Fetch Infisical secret with retry.
 6. Export normalized secret values for child setup scripts.
@@ -51,6 +52,7 @@ Required env:
 
 ```text
 AGENT
+MULTICA_IMAGE_AGENT
 INFISICAL_TOKEN
 INFISICAL_PROJECT_ID
 INFISICAL_ENV
@@ -64,6 +66,8 @@ MULTICA_WORKSPACES_ROOT
 PORT
 ```
 
+`entrypoint.sh` must fail clearly before Infisical fetch when `MULTICA_IMAGE_AGENT` is missing or differs from runtime `AGENT`.
+
 Optional env:
 
 ```text
@@ -75,6 +79,7 @@ Supported agents:
 ```text
 codex
 opencode
+pi
 ```
 
 Infisical fetch:
@@ -90,10 +95,12 @@ Normalized variables:
 ```text
 MULTICA_TOKEN_FROM_SECRET_STORE
 CODEX_AUTH_JSON_B64_FROM_SECRET_STORE
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
 GITHUB_TOKEN_FROM_SECRET_STORE
 ```
 
-`CODEX_AUTH_JSON_B64_FROM_SECRET_STORE` is required only for `AGENT=codex`.
+`CODEX_AUTH_JSON_B64_FROM_SECRET_STORE` is sourced from Infisical field `CODEX_AUTH_JSON_B64` and is required only for `AGENT=codex`.
+`PI_AUTH_JSON_B64_FROM_SECRET_STORE` is sourced from Infisical field `PI_AUTH_JSON_B64` and is required only for `AGENT=pi`.
 `GITHUB_TOKEN_FROM_SECRET_STORE` is optional and used only to create managed `/data/home/.netrc` and `/data/home/.git-credentials` files for private GitHub repo clones.
 
 Health proxy:
@@ -152,6 +159,7 @@ Supported values:
 ```text
 codex
 opencode
+pi
 ```
 
 Unsupported values fail-fast.
@@ -217,6 +225,31 @@ Validation:
 opencode --version
 ```
 
+### Pi
+
+Inputs:
+
+```text
+PI_CODING_AGENT_DIR=/data/pi/agent
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
+```
+
+Rules:
+
+- create `/data/pi` with `chmod 700`;
+- create `PI_CODING_AGENT_DIR` with `chmod 700`;
+- write `PI_CODING_AGENT_DIR/auth.json` only when missing;
+- validate decoded Pi auth JSON before moving it into place;
+- preserve existing `auth.json`;
+- set `auth.json` permission to `600`;
+- do not run interactive `pi` or `/login`.
+
+Validation:
+
+```bash
+pi --version
+```
+
 ## Logging Contract
 
 Allowed startup log fields:
@@ -230,6 +263,7 @@ multica_version
 node_version
 codex_version
 opencode_version
+pi_version
 infisical_secret_path
 workspace_root
 ```
@@ -240,6 +274,8 @@ Forbidden log fields:
 INFISICAL_TOKEN
 MULTICA_TOKEN_FROM_SECRET_STORE
 CODEX_AUTH_JSON_B64_FROM_SECRET_STORE
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
+GITHUB_TOKEN_FROM_SECRET_STORE
 auth.json content
 raw Infisical export response
 API keys
