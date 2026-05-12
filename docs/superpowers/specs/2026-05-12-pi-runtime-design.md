@@ -137,6 +137,24 @@ Install Pi and only validate `pi --version`.
 
 Rejected because a Pi daemon runtime normally needs provider credentials to execute assigned tasks. Deferring auth would produce a deployable image that is likely unusable for real daemon work.
 
+## Implementation Plan Requirements
+
+The implementation plan must explicitly update the existing canonical docs and runtime contracts that currently mention only `codex` and `opencode`:
+
+- `README.md` must document `pi` in the supported runtime list, Vault examples, Railway variables, runtime-specific setup, and troubleshooting.
+- `docs/runtime-spec.md` must include `pi` in supported `AGENT` values, volume layout, runtime environment, and Pi-specific validation.
+- `docs/dockerfile-spec.md` must add `PI_VERSION` as the Pi-specific build argument, persist it as image env, and install `@earendil-works/pi-coding-agent@${PI_VERSION}` for `AGENT=pi`.
+- `docs/scripts-spec.md` must add `PI_AUTH_JSON_B64_FROM_VAULT` to normalized secret variables and forbidden log fields, add `PI_CODING_AGENT_DIR=/data/pi/agent` to runtime exports, and define Pi setup behavior in `setup_agent.sh <agent>`.
+- `docs/railway-template-spec.md` must include Pi build/runtime variables and a Pi deployment example.
+
+The implementation plan must also keep these names consistent across code, docs, and examples:
+
+- Vault field: `pi_auth_json_b64`
+- Normalized shell variable: `PI_AUTH_JSON_B64_FROM_VAULT`
+- Build variable: `PI_VERSION`
+- Runtime config directory: `PI_CODING_AGENT_DIR=/data/pi/agent`
+- Auth file path: `/data/pi/agent/auth.json`
+
 ## Testing Strategy
 
 Documentation/spec verification:
