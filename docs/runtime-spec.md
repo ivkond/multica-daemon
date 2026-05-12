@@ -38,11 +38,12 @@ MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
 
-`AGENT` must be either:
+`AGENT` supported values are:
 
 ```text
 codex
 opencode
+pi
 ```
 
 ## Volume Layout
@@ -60,6 +61,8 @@ Runtime directories:
 /data/workspaces
 /data/codex
 /data/opencode
+/data/pi
+/data/pi/agent
 ```
 
 Environment:
@@ -69,6 +72,7 @@ HOME=/data/home
 MULTICA_WORKSPACES_ROOT=/data/workspaces
 CODEX_HOME=/data/codex
 OPENCODE_HOME=/data/opencode
+PI_CODING_AGENT_DIR=/data/pi/agent
 ```
 
 Permissions:
@@ -78,10 +82,15 @@ chmod 700 /data/home
 chmod 700 /data/workspaces
 chmod 700 /data/codex
 chmod 700 /data/opencode
+chmod 700 /data/pi
+chmod 700 /data/pi/agent
 chmod 600 /data/codex/auth.json
+chmod 600 /data/pi/agent/auth.json
 ```
 
 `/data/codex/auth.json` exists only for `AGENT=codex`.
+
+`/data/pi/agent/auth.json` exists only for `AGENT=pi`.
 
 ## Multica Daemon Env Pass-Through
 
@@ -155,6 +164,14 @@ For OpenCode:
 
 - no provider API key is required in MVP;
 - only `opencode --version` is required.
+
+For Pi:
+
+- `PI_CODING_AGENT_DIR` is set to `/data/pi/agent`;
+- `/data/pi/agent/auth.json` is created from Vault only if missing;
+- existing `/data/pi/agent/auth.json` is preserved;
+- `pi_auth_json_b64` is required in Vault;
+- `pi --version` succeeds.
 
 ## Failure Behavior
 

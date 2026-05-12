@@ -46,7 +46,13 @@ Required when `AGENT=opencode`:
 ARG OPENCODE_VERSION
 ```
 
-Build must fail-fast when required args are empty or when `AGENT` is unsupported.
+Required when `AGENT=pi`:
+
+```dockerfile
+ARG PI_VERSION
+```
+
+Build must fail-fast when required args are empty or when `AGENT` is unsupported. Supported `AGENT` values are `codex`, `opencode`, and `pi`.
 
 ## Runtime Env Export
 
@@ -59,6 +65,7 @@ ENV NODE_VERSION=$NODE_VERSION
 ENV PNPM_VERSION=$PNPM_VERSION
 ENV CODEX_VERSION=$CODEX_VERSION
 ENV OPENCODE_VERSION=$OPENCODE_VERSION
+ENV PI_VERSION=$PI_VERSION
 ```
 
 These env values are not used to install software at runtime.
@@ -147,6 +154,15 @@ opencode --version
 ```
 
 If this install path becomes unsuitable for reproducible builds, post-MVP work should replace it with direct official release asset download.
+
+### Pi
+
+Pi is installed through the pinned npm package path:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent@${PI_VERSION}
+pi --version
+```
 
 ## Runtime User
 

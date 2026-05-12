@@ -41,11 +41,22 @@ Required for OpenCode:
 OPENCODE_VERSION=0.1.0
 ```
 
-`AGENT` must be:
+Required for Pi:
+
+```dotenv
+AGENT=pi
+MULTICA_VERSION=v0.2.27
+NODE_VERSION=22.15.0
+PNPM_VERSION=10.10.0
+PI_VERSION=0.74.0
+```
+
+`AGENT` supported values are:
 
 ```text
 codex
 opencode
+pi
 ```
 
 ## Runtime Variables
@@ -92,7 +103,8 @@ The volume stores:
 - Multica CLI state under `/data/home`;
 - workspaces under `/data/workspaces`;
 - Codex state under `/data/codex`;
-- OpenCode state under `/data/opencode`.
+- OpenCode state under `/data/opencode`;
+- Pi state under `/data/pi`.
 
 Each named runtime needs its own volume.
 
@@ -131,6 +143,16 @@ VAULT_SECRET_PATH=kv/data/multica-daemon/agent-opencode-1
 MULTICA_DAEMON_ID=agent-opencode-1
 MULTICA_DAEMON_DEVICE_NAME=agent-opencode-1
 MULTICA_AGENT_RUNTIME_NAME=OpenCode Runtime 1
+```
+
+Pi runtime:
+
+```dotenv
+AGENT=pi
+VAULT_SECRET_PATH=kv/data/multica-daemon/agent-pi-1
+MULTICA_DAEMON_ID=agent-pi-1
+MULTICA_DAEMON_DEVICE_NAME=agent-pi-1
+MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
 ```
 
 ## Replicas

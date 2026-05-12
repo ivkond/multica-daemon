@@ -37,6 +37,7 @@ Steps:
    export MULTICA_WORKSPACES_ROOT="${MULTICA_WORKSPACES_ROOT}"
    export CODEX_HOME=/data/codex
    export OPENCODE_HOME=/data/opencode
+   export PI_CODING_AGENT_DIR=/data/pi/agent
    ```
 3. Create runtime directories.
 4. Fetch Vault secret with retry.
@@ -67,6 +68,7 @@ Supported agents:
 ```text
 codex
 opencode
+pi
 ```
 
 Vault fetch:
@@ -83,9 +85,12 @@ Normalized variables:
 ```text
 MULTICA_TOKEN_FROM_VAULT
 CODEX_AUTH_JSON_B64_FROM_VAULT
+PI_AUTH_JSON_B64_FROM_VAULT
 ```
 
 `CODEX_AUTH_JSON_B64_FROM_VAULT` is required only for `AGENT=codex`.
+
+`PI_AUTH_JSON_B64_FROM_VAULT` is sourced from Vault field `pi_auth_json_b64` and is required only for `AGENT=pi`.
 
 Health proxy:
 
@@ -143,6 +148,7 @@ Supported values:
 ```text
 codex
 opencode
+pi
 ```
 
 Unsupported values fail-fast.
@@ -208,6 +214,30 @@ Validation:
 opencode --version
 ```
 
+### Pi
+
+Inputs:
+
+```text
+PI_CODING_AGENT_DIR=/data/pi/agent
+PI_AUTH_JSON_B64_FROM_VAULT
+```
+
+Rules:
+
+- create `/data/pi` with `chmod 700`;
+- create `PI_CODING_AGENT_DIR` with `chmod 700`;
+- write `PI_CODING_AGENT_DIR/auth.json` only when missing;
+- preserve existing `auth.json`;
+- set `auth.json` permission to `600`;
+- do not run interactive `pi` or `/login`.
+
+Validation:
+
+```bash
+pi --version
+```
+
 ## Logging Contract
 
 Allowed startup log fields:
@@ -221,6 +251,7 @@ multica_version
 node_version
 codex_version
 opencode_version
+pi_version
 vault_secret_path
 workspace_root
 ```
@@ -231,6 +262,7 @@ Forbidden log fields:
 VAULT_TOKEN
 MULTICA_TOKEN_FROM_VAULT
 CODEX_AUTH_JSON_B64_FROM_VAULT
+PI_AUTH_JSON_B64_FROM_VAULT
 auth.json content
 raw Vault response
 API keys
