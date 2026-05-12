@@ -34,25 +34,21 @@ ARG NODE_VERSION
 ARG PNPM_VERSION
 ```
 
-Required when `AGENT=codex`:
+Optional agent version args are declared with empty defaults so non-selected agents may leave them empty:
 
 ```dockerfile
-ARG CODEX_VERSION
+ARG CODEX_VERSION=
+ARG OPENCODE_VERSION=
+ARG PI_VERSION=
 ```
 
-Required when `AGENT=opencode`:
+Required when `AGENT=codex`: `CODEX_VERSION` must be non-empty.
 
-```dockerfile
-ARG OPENCODE_VERSION
-```
+Required when `AGENT=opencode`: `OPENCODE_VERSION` must be non-empty.
 
-Required when `AGENT=pi`:
+Required when `AGENT=pi`: `PI_VERSION` must be non-empty.
 
-```dockerfile
-ARG PI_VERSION
-```
-
-Build must fail-fast when required args are empty or when `AGENT` is unsupported. Supported `AGENT` values are `codex`, `opencode`, and `pi`.
+Build must fail-fast when the selected agent version arg is empty or when `AGENT` is unsupported. Supported `AGENT` values are `codex`, `opencode`, and `pi`.
 
 ## Runtime Env Export
 
@@ -60,6 +56,7 @@ Build args are persisted as image env for logging and validation:
 
 ```dockerfile
 ENV AGENT=$AGENT
+ENV MULTICA_IMAGE_AGENT=$AGENT
 ENV MULTICA_VERSION=$MULTICA_VERSION
 ENV NODE_VERSION=$NODE_VERSION
 ENV PNPM_VERSION=$PNPM_VERSION
@@ -68,7 +65,7 @@ ENV OPENCODE_VERSION=$OPENCODE_VERSION
 ENV PI_VERSION=$PI_VERSION
 ```
 
-These env values are not used to install software at runtime.
+These env values are not used to install software at runtime. `MULTICA_IMAGE_AGENT` records the agent baked into the image; entrypoint validation must fail clearly if runtime `AGENT` differs from `MULTICA_IMAGE_AGENT`.
 
 ## System Dependencies
 
@@ -103,7 +100,7 @@ corepack prepare pnpm@${PNPM_VERSION} --activate
 
 ## Multica Install
 
-`setup_multica.sh` installs Multica from official GitHub release artifacts using exact `MULTICA_VERSION`.
+The Dockerfile build steps, or build-only helper scripts, install Multica from official GitHub release artifacts using exact `MULTICA_VERSION`. Runtime script `scripts/setup_multica.sh` is not invoked during build; it remains runtime-only configuration and authentication.
 
 Rules:
 
@@ -113,17 +110,11 @@ Rules:
 - binary must end up on `PATH`;
 - build verifies `multica --version`.
 
-The implementation must encode the supported release asset naming for Linux amd64 in the script and fail clearly if the asset cannot be resolved.
+The implementation must encode the supported release asset naming for Linux amd64 in the build install path and fail clearly if the asset cannot be resolved.
 
 ## Agent Install
 
-One image contains one agent CLI.
-
-Build invokes:
-
-```dockerfile
-RUN ./scripts/setup_agent.sh "$AGENT"
-```
+One image contains one agent CLI. The Dockerfile build steps, or build-only helper scripts, install only the selected agent CLI using the selected non-empty version arg. Runtime script `scripts/setup_agent.sh` is not invoked during build; it remains runtime-only agent configuration.
 
 ### Codex
 
@@ -184,4 +175,4 @@ The Dockerfile copies scripts into the image and sets:
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 ```
 
-The image must not require secrets during build.
+The image must not require secrets during build, including Vault-provided Pi auth such as `PI_AUTH_JSON_B64_FROM_VAULT`.

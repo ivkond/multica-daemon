@@ -38,6 +38,8 @@ MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
 
+`AGENT` must match `MULTICA_IMAGE_AGENT`, the agent baked into the image at build time. If `MULTICA_IMAGE_AGENT` is unset or differs from runtime `AGENT`, startup must fail clearly before Vault access or setup scripts run.
+
 `AGENT` supported values are:
 
 ```text
@@ -147,6 +149,7 @@ The proxy may be implemented with Python stdlib because `python3-minimal` is par
 Minimal startup validation:
 
 - required env variables are set;
+- runtime `AGENT` matches image-baked `MULTICA_IMAGE_AGENT`;
 - `/data` directories exist and are writable;
 - Vault fetch succeeds;
 - selected secret fields are present;

@@ -30,7 +30,7 @@ Responsibility: runtime orchestration.
 
 Steps:
 
-1. Validate required runtime env.
+1. Validate required runtime env, including that `AGENT` matches image-baked `MULTICA_IMAGE_AGENT`.
 2. Export runtime paths:
    ```bash
    export HOME=/data/home
@@ -51,6 +51,7 @@ Required env:
 
 ```text
 AGENT
+MULTICA_IMAGE_AGENT
 VAULT_ADDR
 VAULT_TOKEN
 VAULT_SECRET_PATH
@@ -62,6 +63,8 @@ MULTICA_AGENT_RUNTIME_NAME
 MULTICA_WORKSPACES_ROOT
 PORT
 ```
+
+`entrypoint.sh` must fail clearly before Vault fetch when `MULTICA_IMAGE_AGENT` is missing or differs from runtime `AGENT`.
 
 Supported agents:
 
