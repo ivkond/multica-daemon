@@ -4,7 +4,7 @@
 
 **Goal:** Update the public runtime documentation and specs so `multica-daemon` supports `AGENT=pi` alongside `codex` and `opencode`.
 
-**Architecture:** This repository currently contains documentation/spec contracts rather than runtime source files. The implementation is therefore a docs/spec contract update: README explains the user-facing Pi runtime flow, while the spec files define the exact Docker, script, Railway, Vault, path, and validation behavior future runtime code must implement.
+**Architecture:** This repository currently contains documentation/spec contracts rather than runtime source files. The implementation is therefore a docs/spec contract update: README explains the user-facing Pi runtime flow, while the spec files define the exact Docker, script, Railway, Infisical, path, and validation behavior future runtime code must implement.
 
 **Tech Stack:** Markdown docs, Railway deployment variables, Debian Docker runtime contract, bash script contracts, npm-installed Pi CLI package `@earendil-works/pi-coding-agent`.
 
@@ -22,10 +22,10 @@
 
 ## File Structure
 
-- Modify `README.md`: user-facing support matrix, Vault examples, Railway variables, Pi credential bootstrap, troubleshooting, and next-build list.
+- Modify `README.md`: user-facing support matrix, Infisical examples, Railway variables, Pi credential bootstrap, troubleshooting, and next-build list.
 - Modify `docs/runtime-spec.md`: supported agents, volume layout, exported env, and runtime validation for Pi.
 - Modify `docs/dockerfile-spec.md`: Pi build arg/env/install contract.
-- Modify `docs/scripts-spec.md`: Pi runtime setup contract, normalized Vault variable, forbidden log fields, and path exports.
+- Modify `docs/scripts-spec.md`: Pi runtime setup contract, normalized Infisical variable, forbidden log fields, and path exports.
 - Modify `docs/railway-template-spec.md`: Pi build variables, runtime examples, and volume contents.
 
 ---
@@ -33,6 +33,7 @@
 ### Task 1: Update README Pi Runtime User Documentation
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Read the approved design and current README**
@@ -44,16 +45,16 @@ read docs/superpowers/specs/2026-05-12-pi-runtime-design.md
 read README.md
 ```
 
-Expected: the design shows `pi_auth_json_b64`, `PI_VERSION`, `PI_CODING_AGENT_DIR=/data/pi/agent`, and `/data/pi/agent/auth.json`; README currently documents only `codex` and `opencode`.
+Expected: the design shows `PI_AUTH_JSON_B64`, `PI_VERSION`, `PI_CODING_AGENT_DIR=/data/pi/agent`, and `/data/pi/agent/auth.json`; README currently documents only `codex` and `opencode`.
 
 - [ ] **Step 2: Update the runtime list and deployment examples**
 
 Edit `README.md` so every supported-agent list includes `pi`:
 
 ```text
-- `codex` - Codex CLI with ChatGPT subscription credentials loaded from HashiCorp Vault.
+- `codex` - Codex CLI with ChatGPT subscription credentials loaded from Infisical.
 - `opencode` - OpenCode CLI with default free provider behavior.
-- `pi` - Pi CLI with provider credentials restored from a Vault-backed `auth.json` bundle.
+- `pi` - Pi CLI with provider credentials restored from a Infisical-backed `auth.json` bundle.
 ```
 
 Update example daemon names to include:
@@ -62,21 +63,21 @@ Update example daemon names to include:
 agent-pi-1
 ```
 
-- [ ] **Step 3: Add Vault setup for Pi**
+- [ ] **Step 3: Add Infisical setup for Pi**
 
-In the Vault Setup section, after the OpenCode example, add:
+In the Infisical Setup section, after the OpenCode example, add:
 
 ```json
 {
-  "multica_token": "mul_replace_with_runtime_token",
-  "pi_auth_json_b64": "base64_encoded_pi_auth_json"
+  "MULTICA_TOKEN": "mul_replace_with_runtime_token",
+  "PI_AUTH_JSON_B64": "base64_encoded_pi_auth_json"
 }
 ```
 
 Add explanatory text:
 
 ```text
-For a Pi runtime, `pi_auth_json_b64` is a base64-encoded Pi `auth.json` file prepared outside CI/CD. Pi stores provider credentials in `~/.pi/agent/auth.json`; the runtime restores that file to `/data/pi/agent/auth.json` and sets `PI_CODING_AGENT_DIR=/data/pi/agent`.
+For a Pi runtime, `PI_AUTH_JSON_B64` is a base64-encoded Pi `auth.json` file prepared outside CI/CD. Pi stores provider credentials in `~/.pi/agent/auth.json`; the runtime restores that file to `/data/pi/agent/auth.json` and sets `PI_CODING_AGENT_DIR=/data/pi/agent`.
 ```
 
 - [ ] **Step 4: Add Railway variables for Pi**
@@ -95,7 +96,7 @@ Add or update runtime examples so a Pi daemon can be configured as:
 
 ```dotenv
 AGENT=pi
-VAULT_SECRET_PATH=kv/data/multica-daemon/agent-pi-1
+INFISICAL_SECRET_PATH=/multica-daemon/agent-pi-1
 MULTICA_DAEMON_ID=agent-pi-1
 MULTICA_DAEMON_DEVICE_NAME=agent-pi-1
 MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
@@ -105,7 +106,7 @@ MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
 
 Add a section named `## Pi Runtime` after the OpenCode section:
 
-```markdown
+````markdown
 ## Pi Runtime
 
 Pi is installed from the pinned npm package `@earendil-works/pi-coding-agent`.
@@ -118,11 +119,13 @@ pi
 # Run /login and select the intended provider, or configure API-key auth.
 base64 -w 0 /tmp/pi-bootstrap/agent/auth.json
 ```
+````
 
-Store the base64 output in Vault as `pi_auth_json_b64`.
+Store the base64 output in Infisical as `PI_AUTH_JSON_B64`.
 
 At startup, the container writes `/data/pi/agent/auth.json` only if the file does not already exist. After the first start, the Railway Volume becomes the source of truth so Pi can preserve refreshed credentials and local state.
-```
+
+````
 
 - [ ] **Step 6: Update environment variable and troubleshooting text**
 
@@ -133,8 +136,8 @@ Add troubleshooting entry:
 ```markdown
 **Pi runtime starts but Pi tasks fail**
 
-Check that `/data/pi/agent/auth.json` exists, has `600` permissions, and was created from the intended Pi login or API-key configuration. Confirm the selected Pi provider/model works locally before encoding the file for Vault.
-```
+Check that `/data/pi/agent/auth.json` exists, has `600` permissions, and was created from the intended Pi login or API-key configuration. Confirm the selected Pi provider/model works locally before encoding the file for Infisical.
+````
 
 Update the `What You Can Build Next` list so it no longer implies adding more agent CLIs is entirely future work; phrase it as `additional agent CLIs beyond Codex, OpenCode, and Pi`.
 
@@ -143,10 +146,10 @@ Update the `What You Can Build Next` list so it no longer implies adding more ag
 Run:
 
 ```bash
-rg -n "codex|opencode|pi|PI_VERSION|pi_auth_json_b64|PI_CODING_AGENT_DIR|agent-pi-1" README.md
+rg -n "codex|opencode|pi|PI_VERSION|PI_AUTH_JSON_B64|PI_CODING_AGENT_DIR|agent-pi-1" README.md
 ```
 
-Expected: README contains the Pi runtime list item, Vault field, pinned `PI_VERSION`, bootstrap commands, Pi deployment example, and troubleshooting entry.
+Expected: README contains the Pi runtime list item, Infisical field, pinned `PI_VERSION`, bootstrap commands, Pi deployment example, and troubleshooting entry.
 
 - [ ] **Step 8: Commit Task 1**
 
@@ -164,6 +167,7 @@ Expected: commit succeeds with only `README.md` changed for this task.
 ### Task 2: Update Runtime Contract Specs for Pi
 
 **Files:**
+
 - Modify: `docs/runtime-spec.md`
 - Modify: `docs/dockerfile-spec.md`
 - Modify: `docs/scripts-spec.md`
@@ -215,9 +219,9 @@ Add Pi validation behavior:
 ```text
 For Pi:
 - `PI_CODING_AGENT_DIR` is set to `/data/pi/agent`;
-- `/data/pi/agent/auth.json` is created from Vault only if missing;
+- `/data/pi/agent/auth.json` is created from Infisical only if missing;
 - existing `/data/pi/agent/auth.json` is preserved;
-- `pi_auth_json_b64` is required in Vault;
+- `PI_AUTH_JSON_B64` is required in Infisical;
 - `pi --version` succeeds.
 ```
 
@@ -256,13 +260,13 @@ Add runtime export:
 export PI_CODING_AGENT_DIR=/data/pi/agent
 ```
 
-Add normalized Vault variable:
+Add normalized Infisical variable:
 
 ```text
-PI_AUTH_JSON_B64_FROM_VAULT
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
 ```
 
-State that `PI_AUTH_JSON_B64_FROM_VAULT` is required only for `AGENT=pi`.
+State that `PI_AUTH_JSON_B64_FROM_SECRET_STORE` is required only for `AGENT=pi`.
 
 Add Pi setup contract under `setup_agent.sh <agent>`:
 
@@ -271,7 +275,7 @@ Add Pi setup contract under `setup_agent.sh <agent>`:
 
 Inputs:
 - `PI_CODING_AGENT_DIR=/data/pi/agent`
-- `PI_AUTH_JSON_B64_FROM_VAULT`
+- `PI_AUTH_JSON_B64_FROM_SECRET_STORE`
 
 Rules:
 - create `/data/pi` and `PI_CODING_AGENT_DIR` with `chmod 700`;
@@ -287,7 +291,7 @@ Validation:
 Add forbidden log field:
 
 ```text
-PI_AUTH_JSON_B64_FROM_VAULT
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
 ```
 
 - [ ] **Step 5: Update `docs/railway-template-spec.md`**
@@ -310,7 +314,7 @@ Add deployment example:
 
 ```dotenv
 AGENT=pi
-VAULT_SECRET_PATH=kv/data/multica-daemon/agent-pi-1
+INFISICAL_SECRET_PATH=/multica-daemon/agent-pi-1
 MULTICA_DAEMON_ID=agent-pi-1
 MULTICA_DAEMON_DEVICE_NAME=agent-pi-1
 MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
@@ -321,7 +325,7 @@ MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
 Run:
 
 ```bash
-rg -n "AGENT.*codex|AGENT.*opencode|AGENT.*pi|PI_VERSION|pi_auth_json_b64|PI_AUTH_JSON_B64_FROM_VAULT|PI_CODING_AGENT_DIR|/data/pi|agent-pi-1" README.md docs/runtime-spec.md docs/dockerfile-spec.md docs/scripts-spec.md docs/railway-template-spec.md
+rg -n "AGENT.*codex|AGENT.*opencode|AGENT.*pi|PI_VERSION|PI_AUTH_JSON_B64|PI_AUTH_JSON_B64_FROM_SECRET_STORE|PI_CODING_AGENT_DIR|/data/pi|agent-pi-1" README.md docs/runtime-spec.md docs/dockerfile-spec.md docs/scripts-spec.md docs/railway-template-spec.md
 ```
 
 Expected: all five canonical docs include Pi where appropriate and use exact agreed names.
@@ -355,7 +359,7 @@ After both tasks complete, run:
 
 ```bash
 git status --short
-rg -n "pi_auth_json_b64|PI_AUTH_JSON_B64_FROM_VAULT|PI_VERSION|PI_CODING_AGENT_DIR|/data/pi/agent/auth.json|agent-pi-1" README.md docs/runtime-spec.md docs/dockerfile-spec.md docs/scripts-spec.md docs/railway-template-spec.md docs/superpowers/specs/2026-05-12-pi-runtime-design.md
+rg -n "PI_AUTH_JSON_B64|PI_AUTH_JSON_B64_FROM_SECRET_STORE|PI_VERSION|PI_CODING_AGENT_DIR|/data/pi/agent/auth.json|agent-pi-1" README.md docs/runtime-spec.md docs/dockerfile-spec.md docs/scripts-spec.md docs/railway-template-spec.md docs/superpowers/specs/2026-05-12-pi-runtime-design.md
 ```
 
 Expected:

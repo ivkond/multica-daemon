@@ -19,12 +19,12 @@ Definition of Done:
 - pinned version variable for each agent;
 - `setup_agent.sh <agent>` support;
 - `<agent> --version` startup validation;
-- Vault secret shape example if the agent needs credentials;
+- Infisical secret shape example if the agent needs credentials;
 - README deployment example for at least one additional agent.
 
 ## 2. Secret Provider Options
 
-Add secret provider abstraction while keeping Vault compatibility.
+Add secret provider abstraction while keeping Infisical compatibility.
 
 Candidate providers:
 
@@ -39,7 +39,7 @@ Candidate providers:
 Definition of Done:
 
 - `SECRETS_PROVIDER` selects implementation;
-- Vault remains the default;
+- Infisical remains the default;
 - all providers normalize to the same internal fields;
 - secret values remain redacted in logs;
 - docs include provider setup examples.
@@ -54,7 +54,7 @@ Definition of Done:
 - `CODEX_AUTH_MODE=api_key` allows `OPENAI_API_KEY` or `CODEX_API_KEY`;
 - conflicting auth settings fail-fast;
 - README explains billing implications;
-- Vault secret shape includes API key mode.
+- Infisical secret shape includes API key mode.
 
 ## 4. OpenCode Provider Profiles
 
@@ -180,8 +180,8 @@ Before a larger runtime fleet, run a focused security review.
 
 Definition of Done:
 
-- threat model covers Vault token, Multica token, Codex OAuth credentials, workspaces, and agent shell access;
+- threat model covers Infisical token, Multica token, Codex OAuth credentials, workspaces, and agent shell access;
 - logs are checked for secret leakage;
-- each runtime has a unique daemon id, Vault path, and volume;
+- each runtime has a unique daemon id, Infisical path, and volume;
 - replicas are disabled for stateful runtime services;
 - incident response steps are documented and rehearsed.

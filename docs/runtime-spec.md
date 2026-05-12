@@ -1,6 +1,6 @@
 # Runtime Specification
 
-Date: 2026-05-07
+Date: 2026-05-08
 
 ## Runtime Lifecycle
 
@@ -8,7 +8,7 @@ Container startup follows one sequence:
 
 1. Validate required environment variables.
 2. Create persistent directories under `/data`.
-3. Fetch runtime secret from Vault.
+3. Fetch runtime secret from Infisical.
 4. Configure Multica CLI.
 5. Configure selected agent.
 6. Start Railway health proxy on `$PORT`.
@@ -25,20 +25,22 @@ exec multica daemon start --foreground
 ## Required Runtime Environment
 
 ```dotenv
-AGENT=codex
-VAULT_ADDR=https://vault.example.com
-VAULT_TOKEN=railway_sealed_vault_token
-VAULT_SECRET_PATH=kv/data/multica-daemon/agent-codex-1
+AGENT=opencode
+INFISICAL_TOKEN=railway_sealed_infisical_token
+INFISICAL_PROJECT_ID=<project-id>
+INFISICAL_ENV=prod
+INFISICAL_SECRET_PATH=/multica-daemon/agent-opencode-1
+INFISICAL_API_URL=https://app.infisical.com/api
 MULTICA_SERVER_URL=https://api.example.com
 MULTICA_APP_URL=https://app.example.com
-MULTICA_DAEMON_ID=agent-codex-1
-MULTICA_DAEMON_DEVICE_NAME=agent-codex-1
-MULTICA_AGENT_RUNTIME_NAME=Codex Runtime 1
+MULTICA_DAEMON_ID=agent-opencode-1
+MULTICA_DAEMON_DEVICE_NAME=agent-opencode-1
+MULTICA_AGENT_RUNTIME_NAME=OpenCode Runtime 1
 MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
 
-`AGENT` must match `MULTICA_IMAGE_AGENT`, the agent baked into the image at build time. If `MULTICA_IMAGE_AGENT` is unset or differs from runtime `AGENT`, startup must fail clearly before Vault access or setup scripts run.
+`AGENT` must match `MULTICA_IMAGE_AGENT`, the agent baked into the image at build time. If `MULTICA_IMAGE_AGENT` is unset or differs from runtime `AGENT`, startup must fail clearly before Infisical access or setup scripts run.
 
 `AGENT` supported values are:
 
@@ -76,6 +78,8 @@ CODEX_HOME=/data/codex
 OPENCODE_HOME=/data/opencode
 PI_CODING_AGENT_DIR=/data/pi/agent
 ```
+
+`MULTICA_WORKSPACES_ROOT` must resolve to a child path under `/data`, such as `/data/workspaces`. Startup rejects `/data`, `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, `/data/pi/agent`, and descendants of those runtime state paths so workspaces cannot collide with CLI state.
 
 Permissions:
 
@@ -139,10 +143,10 @@ Proxy behavior:
 
 - Return `200` if local daemon health JSON has `status == "running"`.
 - Return `503` if local daemon health is unreachable or status is not `running`.
-- Do not call Vault during healthchecks.
+- Do not call Infisical during healthchecks.
 - Do not print secrets in responses or logs.
 
-The proxy may be implemented with Python stdlib because `python3-minimal` is part of the image runtime dependencies.
+The proxy may be implemented with Python stdlib because `python3` is part of the image runtime dependencies.
 
 ## Runtime Validation
 
@@ -150,18 +154,21 @@ Minimal startup validation:
 
 - required env variables are set;
 - runtime `AGENT` matches image-baked `MULTICA_IMAGE_AGENT`;
+- `MULTICA_WORKSPACES_ROOT` resolves under `/data` and does not overlap `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, or `/data/pi/agent`;
 - `/data` directories exist and are writable;
-- Vault fetch succeeds;
+- Infisical export succeeds;
 - selected secret fields are present;
+- optional GitHub token creates managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions;
 - `multica --version` succeeds;
-- `multica auth status` succeeds after token login;
+- `multica login --token` succeeds without printing token values;
 - `<agent> --version` succeeds.
 
 For Codex:
 
 - `OPENAI_API_KEY` and `CODEX_API_KEY` are silently unset;
-- `/data/codex/auth.json` is created from Vault only if missing;
-- existing `/data/codex/auth.json` is preserved.
+- existing `/data/codex/auth.json` is preserved and remains the source of truth after first start;
+- `/data/codex/auth.json` is created from Infisical only if missing;
+- decoded Codex auth JSON is validated before it is moved into place.
 
 For OpenCode:
 
@@ -171,9 +178,10 @@ For OpenCode:
 For Pi:
 
 - `PI_CODING_AGENT_DIR` is set to `/data/pi/agent`;
-- `/data/pi/agent/auth.json` is created from Vault only if missing;
-- existing `/data/pi/agent/auth.json` is preserved;
-- `pi_auth_json_b64` is required in Vault;
+- existing `/data/pi/agent/auth.json` is preserved and remains the source of truth after first start;
+- `/data/pi/agent/auth.json` is created from Infisical only if missing;
+- decoded Pi auth JSON is validated before it is moved into place;
+- `PI_AUTH_JSON_B64` is required in Infisical;
 - `pi --version` succeeds.
 
 ## Failure Behavior
@@ -181,8 +189,8 @@ For Pi:
 Startup must fail before daemon launch when:
 
 - required env is missing;
-- Vault is unreachable after retry;
-- Vault secret is missing required fields;
+- Infisical is unreachable or unauthorized after retry;
+- Infisical secret is missing required fields;
 - base64 decode fails;
 - Multica auth fails;
 - selected agent binary is not available;
