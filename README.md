@@ -10,6 +10,7 @@ This repo helps you build and deploy a small runtime service. It connects to you
 
 - `codex` - Codex CLI with ChatGPT subscription credentials loaded from HashiCorp Vault.
 - `opencode` - OpenCode CLI with default free provider behavior.
+- `pi` - Pi CLI with provider credentials restored from a Vault-backed `auth.json` bundle.
 
 Each deployment is a separate named runtime:
 
@@ -17,6 +18,7 @@ Each deployment is a separate named runtime:
 agent-codex-1
 agent-codex-2
 agent-opencode-1
+agent-pi-1
 ```
 
 Use a separate Railway service, volume, daemon id, and Vault path for each runtime.
@@ -47,6 +49,8 @@ You need:
 
 For Codex, you also need a prepared `CODEX_HOME/auth.json` created through a ChatGPT subscription login. The container does not perform interactive OAuth.
 
+For Pi, you also need a prepared `~/.pi/agent/auth.json` created through Pi login or API-key configuration. The container restores this bundle from Vault and does not perform interactive login.
+
 ## Vault Setup
 
 Store only Vault access variables in Railway:
@@ -75,6 +79,17 @@ For an OpenCode runtime, store this in Vault:
   "multica_token": "mul_replace_with_runtime_token"
 }
 ```
+
+For a Pi runtime, store this in Vault:
+
+```json
+{
+  "multica_token": "mul_replace_with_runtime_token",
+  "pi_auth_json_b64": "base64_encoded_pi_auth_json"
+}
+```
+
+Pi stores provider credentials in `~/.pi/agent/auth.json`. The runtime restores the bundle to `/data/pi/agent/auth.json` and sets `PI_CODING_AGENT_DIR=/data/pi/agent` so Pi config and state live on the persistent volume.
 
 `VAULT_TOKEN` must be read-only and scoped to exactly one runtime path.
 
@@ -125,6 +140,26 @@ PNPM_VERSION=10.10.0
 OPENCODE_VERSION=0.1.0
 ```
 
+For Pi:
+
+```dotenv
+AGENT=pi
+MULTICA_VERSION=v0.2.27
+NODE_VERSION=22.15.0
+PNPM_VERSION=10.10.0
+PI_VERSION=0.74.0
+```
+
+Pi runtime variables:
+
+```dotenv
+AGENT=pi
+VAULT_SECRET_PATH=kv/data/multica-daemon/agent-pi-1
+MULTICA_DAEMON_ID=agent-pi-1
+MULTICA_DAEMON_DEVICE_NAME=agent-pi-1
+MULTICA_AGENT_RUNTIME_NAME=Pi Runtime 1
+```
+
 ## Codex Runtime
 
 Codex uses ChatGPT subscription credentials, not `OPENAI_API_KEY`.
@@ -149,13 +184,30 @@ OpenCode is installed through its upstream-supported pinned install path. In the
 
 Provider-specific OpenCode secrets can be added later without changing the Multica daemon contract.
 
+## Pi Runtime
+
+Pi is installed from the pinned npm package `@earendil-works/pi-coding-agent`.
+
+Prepare credentials outside CI/CD:
+
+```bash
+export PI_CODING_AGENT_DIR=/tmp/pi-bootstrap/agent
+pi
+# Run /login and select the intended provider, or configure API-key auth.
+base64 -w 0 /tmp/pi-bootstrap/agent/auth.json
+```
+
+Store the base64 output in Vault as `pi_auth_json_b64`.
+
+At startup, the container writes `/data/pi/agent/auth.json` only if the file does not already exist. After the first start, the Railway Volume becomes the source of truth so Pi can preserve refreshed credentials and local state.
+
 ## Environment Variables
 
 Required runtime variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `AGENT` | `codex` or `opencode` |
+| `AGENT` | `codex`, `opencode`, or `pi` |
 | `VAULT_ADDR` | Vault base URL |
 | `VAULT_TOKEN` | Read-only Vault token for this runtime |
 | `VAULT_SECRET_PATH` | KV v2 API path for the runtime secret |
@@ -220,6 +272,10 @@ Check that `/data/codex/auth.json` exists and was created with `codex login --de
 
 Check Railway logs for the startup check `opencode --version`. Multica daemon discovers agent CLIs through `PATH`.
 
+**Pi runtime starts but Pi tasks fail**
+
+Check that `/data/pi/agent/auth.json` exists, has `600` permissions, and was created from the intended Pi login or API-key configuration. Confirm the selected Pi provider/model works locally before encoding the file for Vault.
+
 **Daemon does not appear in Multica**
 
 Check `MULTICA_SERVER_URL`, `MULTICA_DAEMON_ID`, `MULTICA_DAEMON_DEVICE_NAME`, `MULTICA_AGENT_RUNTIME_NAME`, and the Vault field `multica_token`.
@@ -240,10 +296,10 @@ curl -fsS http://127.0.0.1:${PORT}/health
 
 ## What You Can Build Next
 
-Once one Codex or OpenCode runtime is stable, the same pattern can expand into:
+Once one Codex, OpenCode, or Pi runtime is stable, the same pattern can expand into:
 
 - more named daemon services;
-- more agent CLIs;
+- additional agent CLIs beyond Codex, OpenCode, and Pi;
 - provider-specific OpenCode profiles;
 - alternative secret providers;
 - non-root hardening;
