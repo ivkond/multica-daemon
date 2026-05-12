@@ -77,6 +77,26 @@ Required field:
 
 OpenCode provider API keys are not required in MVP.
 
+### Pi
+
+```json
+{
+  "multica_token": "mul_replace_with_runtime_token",
+  "pi_auth_json_b64": "base64_encoded_pi_auth_json"
+}
+```
+
+Required fields:
+
+- `multica_token`
+- `pi_auth_json_b64`
+
+The runtime normalizes `pi_auth_json_b64` from Vault to:
+
+```text
+PI_AUTH_JSON_B64_FROM_VAULT
+```
+
 ## Codex Credential Handling
 
 Codex uses ChatGPT subscription credentials.
@@ -105,6 +125,22 @@ Codex config:
 forced_login_method = "chatgpt"
 cli_auth_credentials_store = "file"
 ```
+
+## Pi Credential Handling
+
+Pi uses an existing Pi Coding Agent `auth.json` credential.
+
+Bootstrap happens outside CI/CD and outside the runtime container. No interactive `/login` is performed inside the container.
+
+Runtime behavior:
+
+- build with pinned `PI_VERSION=0.74.0` and npm package `@earendil-works/pi-coding-agent@${PI_VERSION}`;
+- set `PI_CODING_AGENT_DIR=/data/pi/agent`;
+- create `/data/pi/agent` with restrictive permissions;
+- decode Vault `pi_auth_json_b64` from `PI_AUTH_JSON_B64_FROM_VAULT` only if `/data/pi/agent/auth.json` is missing;
+- write `/data/pi/agent/auth.json` with restrictive permissions;
+- preserve existing `/data/pi/agent/auth.json` on the Railway volume;
+- do not run interactive `/login` in the container.
 
 ## Multica Token Handling
 
@@ -139,8 +175,11 @@ Forbidden:
 - `VAULT_TOKEN`;
 - `multica_token`;
 - `codex_auth_json_b64`;
+- `pi_auth_json_b64`;
+- `PI_AUTH_JSON_B64_FROM_VAULT`;
 - decoded `auth.json`;
 - raw Vault response;
+- API keys;
 - provider API keys.
 
 ## MVP Security Boundaries
@@ -165,7 +204,7 @@ If a runtime is suspected compromised:
 1. Stop the Railway service.
 2. Revoke the runtime Vault token.
 3. Revoke or rotate Multica personal token.
-4. Rotate Codex credential by creating a fresh `auth.json`.
+4. Rotate Codex or Pi credential by creating a fresh `auth.json`.
 5. Create a new Vault secret path for the replacement runtime.
 6. Attach a fresh Railway volume if workspace trust is uncertain.
 
