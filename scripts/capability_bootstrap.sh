@@ -200,7 +200,7 @@ apply_required_cli_checks() {
 }
 
 apply_github_netrc() {
-  local mode token_ref token netrc_path
+  local mode token_ref token netrc_path netrc_tmp
   mode="$(jq -r '.auth.github.mode // empty' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read manifest .auth.github.mode"
   [[ -n "$mode" ]] || return 0
@@ -209,18 +209,24 @@ apply_github_netrc() {
   token_ref="$(jq -r '.auth.github.token // empty' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read manifest .auth.github.token"
   [[ -n "$token_ref" ]] || die "auth.github.token is required for netrc mode"
+  [[ "$token_ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "auth.github.token must be a secret reference"
   token="$(resolve_secret_ref "$token_ref")"
 
-  mkdir -p "$HOME"
+  [[ -n "${HOME:-}" ]] || die "HOME must be set when writing GitHub netrc"
   [[ ! -L "$HOME" ]] || die "HOME must not be a symlink when writing GitHub netrc: ${HOME}"
+  mkdir -p "$HOME"
   chmod 700 "$HOME"
   netrc_path="${HOME}/.netrc"
   [[ ! -L "$netrc_path" ]] || die "GitHub netrc path must not be a symlink: ${netrc_path}"
+
+  netrc_tmp="$(mktemp "${HOME}/.netrc.XXXXXX")" || die "failed to create temporary GitHub netrc"
+  chmod 600 "$netrc_tmp"
   {
     printf 'machine github.com\n'
     printf '  login x-access-token\n'
     printf '  password %s\n' "$token"
-  } >"$netrc_path"
+  } >"$netrc_tmp"
+  mv "$netrc_tmp" "$netrc_path"
   chmod 600 "$netrc_path"
 }
 
