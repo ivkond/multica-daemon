@@ -58,6 +58,11 @@ resolve_secret_ref() {
   printf '%s' "${!name}"
 }
 
+shell_quote() {
+  local value="$1"
+  printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+}
+
 validate_command_name() {
   local name="$1"
   [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid wrapper command name: ${name}"
@@ -65,6 +70,8 @@ validate_command_name() {
 }
 
 validate_manifest() {
+  local wrapper_names secret_refs
+
   jq -e '.version == 1' "$CAPABILITY_MANIFEST_PATH" >/dev/null || die "capability manifest version must be 1"
 
   require_object_or_absent '.pi'
@@ -79,18 +86,76 @@ validate_manifest() {
   require_object_or_absent '.mcp.servers'
   require_array_or_absent '.validate'
 
-  jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
-    || die "manifest .cli.wrappers entries must be objects with a non-empty name"
+  jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0) and (.target | type == "string" and startswith("/")) and ((.env // {}) | type == "object") and ((.env // {}) | to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:")))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.wrappers entries must be objects with a non-empty name, absolute target, and env object containing secret refs"
 
-  while IFS= read -r name; do
-    name="${name%$'\r'}"
-    validate_command_name "$name"
-  done < <(jq -r '.cli.wrappers[]?.name' "$CAPABILITY_MANIFEST_PATH")
+  wrapper_names="$(jq -r '.cli.wrappers[]?.name' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .cli.wrappers names"
+  if [[ -n "$wrapper_names" ]]; then
+    while IFS= read -r name; do
+      name="${name%$'\r'}"
+      validate_command_name "$name"
+    done <<<"$wrapper_names"
+  fi
 
-  while IFS= read -r ref; do
-    ref="${ref%$'\r'}"
-    validate_secret_ref "$ref"
-  done < <(jq -r '.. | strings | select(startswith("secret:"))' "$CAPABILITY_MANIFEST_PATH")
+  secret_refs="$(jq -r '.. | strings | select(startswith("secret:"))' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest secret references"
+  if [[ -n "$secret_refs" ]]; then
+    while IFS= read -r ref; do
+      ref="${ref%$'\r'}"
+      validate_secret_ref "$ref"
+    done <<<"$secret_refs"
+  fi
+}
+
+render_env_wrapper() {
+  local name="$1"
+  local target="$2"
+  local env_file="${CAPABILITIES_ROOT}/${name}/env"
+  local shim_file="${SHIMS_ROOT}/${name}"
+  local env_entries key ref value
+
+  validate_command_name "$name"
+  [[ "$target" == /* ]] || die "wrapper target for ${name} must be an absolute path"
+  [[ -x "$target" ]] || die "wrapper target for ${name} is not executable: ${target}"
+
+  mkdir -p "${CAPABILITIES_ROOT}/${name}"
+  chmod 700 "${CAPABILITIES_ROOT}/${name}"
+  : >"$env_file"
+  chmod 600 "$env_file"
+
+  env_entries="$(jq -r --arg name "$name" '.cli.wrappers[] | select(.name == $name) | .env // {} | to_entries[] | [.key, .value] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read env entries for wrapper: ${name}"
+
+  if [[ -n "$env_entries" ]]; then
+    while IFS=$'\t' read -r key ref; do
+      [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "invalid env name for wrapper ${name}: ${key}"
+      value="$(resolve_secret_ref "$ref")"
+      printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_file"
+    done <<<"$env_entries"
+  fi
+
+  cat >"$shim_file" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source "$env_file"
+exec "$target" "\$@"
+EOF
+  chmod 755 "$shim_file"
+}
+
+apply_env_wrappers() {
+  local wrapper_rows name target
+
+  wrapper_rows="$(jq -r '.cli.wrappers[]? | [.name, .target] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .cli.wrappers entries"
+
+  if [[ -n "$wrapper_rows" ]]; then
+    while IFS=$'\t' read -r name target; do
+      [[ -n "$name" ]] || die "manifest .cli.wrappers entries must include a non-empty name"
+      render_env_wrapper "$name" "$target"
+    done <<<"$wrapper_rows"
+  fi
 }
 
 apply_required_cli_checks() {
@@ -164,6 +229,8 @@ main() {
 
   validate_manifest
   apply_required_cli_checks
+  apply_env_wrappers
+  export PATH="${SHIMS_ROOT}:${PATH}"
 
   log "capability manifest loaded"
 }
