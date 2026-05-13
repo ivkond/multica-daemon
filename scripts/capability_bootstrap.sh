@@ -87,6 +87,13 @@ validate_manifest() {
   require_object_or_absent '.mcp.servers'
   require_array_or_absent '.validate'
 
+  jq -e '(.pi.packages // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .pi.packages entries must be strings"
+  jq -e '(.pi.skills // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .pi.skills entries must be strings"
+  jq -e '(.pi.extensions // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .pi.extensions entries must be strings"
+
   jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0) and (.target | type == "string" and startswith("/")) and ((.env // {}) | type == "object") and ((.env // {}) | to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:")))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .cli.wrappers entries must be objects with a non-empty name, absolute target, and env object containing secret refs"
 
@@ -199,6 +206,32 @@ apply_required_cli_checks() {
   fi
 }
 
+apply_pi_settings() {
+  local has_pi settings_path settings_tmp
+  has_pi="$(jq -r '((.pi.packages // []) + (.pi.skills // []) + (.pi.extensions // [])) | length' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .pi settings"
+  [[ "$has_pi" != "0" ]] || return 0
+
+  [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
+  mkdir -p "$PI_AGENT_DIR"
+  [[ -d "$PI_AGENT_DIR" ]] || die "Pi agent directory could not be created: ${PI_AGENT_DIR}"
+  chmod 700 "$PI_AGENT_DIR"
+  settings_path="${PI_AGENT_DIR}/settings.json"
+  [[ ! -L "$settings_path" ]] || die "Pi settings path must not be a symlink: ${settings_path}"
+
+  settings_tmp="$(mktemp "${PI_AGENT_DIR}/.settings.XXXXXX")" || die "failed to create temporary Pi settings"
+  chmod 600 "$settings_tmp"
+  jq '{
+    packages: (.pi.packages // []),
+    skills: (.pi.skills // []),
+    extensions: (.pi.extensions // [])
+  }' "$CAPABILITY_MANIFEST_PATH" >"$settings_tmp" \
+    || die "failed to generate Pi settings.json"
+  jq empty "$settings_tmp" >/dev/null || die "generated Pi settings.json is invalid"
+  mv "$settings_tmp" "$settings_path"
+  chmod 600 "$settings_path"
+}
+
 apply_github_netrc() {
   local mode token_ref token netrc_path netrc_tmp
   mode="$(jq -r '.auth.github.mode // empty' "$CAPABILITY_MANIFEST_PATH")" \
@@ -273,6 +306,7 @@ main() {
 
   require_command jq
 
+  [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
   mkdir -p "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR" "$(dirname "$CAPABILITY_MANIFEST_PATH")"
   chmod 700 "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR"
 
@@ -284,6 +318,7 @@ main() {
   apply_required_cli_checks
   apply_env_wrappers
   apply_github_netrc
+  apply_pi_settings
   export PATH="${SHIMS_ROOT}:${PATH}"
 
   log "capability manifest loaded"
