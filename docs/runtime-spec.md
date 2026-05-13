@@ -9,12 +9,13 @@ Container startup follows one sequence:
 1. Validate required environment variables.
 2. Create persistent directories under `/data`.
 3. Fetch runtime secret from Infisical.
-4. Configure Multica CLI.
-5. Configure selected agent.
-6. Start Railway health proxy on `$PORT`.
-7. Execute `multica daemon start --foreground`.
+4. Run capability bootstrap when `AGENT_CAPABILITIES_JSON` or `AGENT_CAPABILITIES_JSON_B64` is configured.
+5. Configure Multica CLI.
+6. Configure selected agent.
+7. Start Railway health proxy on `$PORT`.
+8. Execute `multica daemon start --foreground`.
 
-`entrypoint.sh` must fail fast when any of steps 1-5 fails.
+`entrypoint.sh` must fail fast when any of steps 1-6 fails.
 
 The daemon is launched through `exec` so `multica daemon` becomes the main container process:
 
@@ -67,6 +68,8 @@ Runtime directories:
 /data/opencode
 /data/pi
 /data/pi/agent
+/data/capabilities
+/data/capability-shims
 ```
 
 Environment:
@@ -90,6 +93,8 @@ chmod 700 /data/codex
 chmod 700 /data/opencode
 chmod 700 /data/pi
 chmod 700 /data/pi/agent
+chmod 700 /data/capabilities
+chmod 700 /data/capability-shims
 chmod 600 /data/codex/auth.json
 chmod 600 /data/pi/agent/auth.json
 ```
@@ -97,6 +102,8 @@ chmod 600 /data/pi/agent/auth.json
 `/data/codex/auth.json` exists only for `AGENT=codex`.
 
 `/data/pi/agent/auth.json` exists only for `AGENT=pi`.
+
+When capability bootstrap is configured, it may also write `/data/capabilities/manifest.json`, tool-specific env files under `/data/capabilities`, wrapper commands under `/data/capability-shims`, `/data/home/.netrc`, `/data/pi/agent/settings.json`, and `/data/pi/agent/mcp.json`. Secret-bearing generated files must use `chmod 600`.
 
 ## Multica Daemon Env Pass-Through
 
@@ -158,6 +165,7 @@ Minimal startup validation:
 - `/data` directories exist and are writable;
 - Infisical export succeeds;
 - selected secret fields are present;
+- optional capability bootstrap succeeds after secret fetch and before Multica setup;
 - optional GitHub token creates managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions;
 - `multica --version` succeeds;
 - `multica login --token` succeeds without printing token values;

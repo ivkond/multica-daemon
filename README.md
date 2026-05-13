@@ -29,11 +29,12 @@ The container starts as a small orchestrator:
 
 1. Reads Infisical bootstrap variables from Railway.
 2. Exports the runtime secret from Infisical as JSON.
-3. Configures Multica CLI with your server and app URLs.
-4. Prepares persistent directories under `/data`.
-5. Configures the selected agent.
-6. Starts a thin health proxy on `$PORT`.
-7. Runs `multica daemon start --foreground`.
+3. Prepares persistent directories under `/data`.
+4. Runs capability bootstrap when a manifest is configured.
+5. Configures Multica CLI with your server and app URLs.
+6. Configures the selected agent.
+7. Starts a thin health proxy on `$PORT`.
+8. Runs `multica daemon start --foreground`.
 
 Your Multica backend and frontend can live anywhere: Railway, a VPS, Vercel, another cloud, or your own infrastructure. The daemon only needs reachable URLs.
 
@@ -62,6 +63,34 @@ For Codex, you also need a prepared `CODEX_HOME/auth.json` created through a Cha
 For Pi, you also need a prepared `~/.pi/agent/auth.json` created through Pi login or API-key configuration. The container restores this bundle from Infisical and does not perform interactive login.
 
 Do not put secret values in committed files. Store only the Infisical bootstrap token as a sealed Railway variable, and store runtime secrets in Infisical.
+
+## Capability Bootstrap
+
+Capability bootstrap lets a deployment declare tool checks and deploy-time auth/config preparation before the daemon starts. See the [capability bootstrap specification](docs/capability-bootstrap-spec.md) for the full manifest contract.
+
+Provide the manifest with `AGENT_CAPABILITIES_JSON` or base64-encoded `AGENT_CAPABILITIES_JSON_B64`. Secret-bearing fields use `secret:NAME` references that resolve from the runtime secret environment after Infisical fetch; do not put raw secret values in the manifest.
+
+Minimal manifest example:
+
+```json
+{
+  "version": 1,
+  "cli": {
+    "required": ["git"]
+  },
+  "auth": {
+    "github": {
+      "mode": "netrc",
+      "token": "secret:GITHUB_TOKEN"
+    }
+  },
+  "pi": {
+    "packages": ["npm:@org/pi-agent-toolbox@1.0.0"]
+  }
+}
+```
+
+System binaries listed in `cli.required` still need to be present in the selected image flavor unless they are otherwise explicitly preinstalled. Bootstrap does not install operating-system packages at runtime. Secrets are materialized only into tool-specific files with restrictive permissions, such as generated capability env files or `/data/home/.netrc`.
 
 ## Infisical Setup
 

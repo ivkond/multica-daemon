@@ -175,6 +175,20 @@ Runtime behavior:
 
 The token should be a fine-grained GitHub PAT scoped to the specific repo with `Contents: Read-only`.
 
+## Capability Manifest Handling
+
+Capability manifests contain secret references, not raw values. Secret-bearing manifest fields use `secret:NAME` references that resolve from environment variables populated after the secret-store fetch step.
+
+Runtime behavior:
+
+- prefer `AGENT_CAPABILITIES_JSON_B64` over `AGENT_CAPABILITIES_JSON` when both are set;
+- reject invalid manifests before Multica setup;
+- materialize secrets only into tool-specific generated files;
+- write generated secret files with `chmod 600`;
+- keep secret-bearing generated files under `/data/capabilities` or HOME-only auth files such as `/data/home/.netrc`;
+- suppress validation command output by redirecting stdout and stderr away from logs;
+- do not install operating-system packages at runtime from manifest declarations.
+
 ## Logging Rules
 
 Allowed:
@@ -200,6 +214,8 @@ Forbidden:
 - `GITHUB_TOKEN_FROM_SECRET_STORE`;
 - decoded `auth.json`;
 - raw Infisical export response;
+- raw capability manifest secret values;
+- capability validation command output;
 - provider API keys.
 
 ## MVP Security Boundaries
