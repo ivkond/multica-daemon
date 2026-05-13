@@ -29,11 +29,12 @@ The container starts as a small orchestrator:
 
 1. Reads Infisical bootstrap variables from Railway.
 2. Exports the runtime secret from Infisical as JSON.
-3. Configures Multica CLI with your server and app URLs.
-4. Prepares persistent directories under `/data`.
-5. Configures the selected agent.
-6. Starts a thin health proxy on `$PORT`.
-7. Runs `multica daemon start --foreground`.
+3. Prepares persistent directories under `/data`.
+4. Runs capability bootstrap when a manifest is configured.
+5. Configures Multica CLI with your server and app URLs.
+6. Configures the selected agent.
+7. Starts a thin health proxy on `$PORT`.
+8. Runs `multica daemon start --foreground`.
 
 Your Multica backend and frontend can live anywhere: Railway, a VPS, Vercel, another cloud, or your own infrastructure. The daemon only needs reachable URLs.
 
@@ -62,6 +63,36 @@ For Codex, you also need a prepared `CODEX_HOME/auth.json` created through a Cha
 For Pi, you also need a prepared `~/.pi/agent/auth.json` created through Pi login or API-key configuration. The container restores this bundle from Infisical and does not perform interactive login.
 
 Do not put secret values in committed files. Store only the Infisical bootstrap token as a sealed Railway variable, and store runtime secrets in Infisical.
+
+## Capability Bootstrap
+
+Capability bootstrap lets a deployment declare tool checks and deploy-time auth/config preparation before the daemon starts. See the [capability bootstrap specification](docs/capability-bootstrap-spec.md) for the full manifest contract.
+
+Provide the manifest with `AGENT_CAPABILITIES_JSON` or base64-encoded `AGENT_CAPABILITIES_JSON_B64`. The loaded manifest is persisted at `/data/capabilities/manifest.json`, so never put raw secret values anywhere in it, including unknown or future fields. Secret-bearing fields use `secret:NAME` references that resolve from the runtime secret environment after Infisical fetch.
+
+Minimal manifest example:
+
+```json
+{
+  "version": 1,
+  "cli": {
+    "required": ["git"]
+  },
+  "auth": {
+    "github": {
+      "mode": "netrc",
+      "token": "secret:GITHUB_TOKEN"
+    }
+  },
+  "pi": {
+    "packages": ["npm:@org/pi-agent-toolbox@1.0.0"]
+  }
+}
+```
+
+System binaries listed in `cli.required` still need to be present in the selected image flavor unless they are otherwise explicitly preinstalled. Bootstrap does not install operating-system packages at runtime. Packages listed in `pi.packages` are installed by the Pi runtime bootstrap. Secrets are materialized only into tool-specific files with restrictive permissions, such as generated capability env files or `/data/home/.netrc`.
+
+For normal private GitHub HTTPS workspace clones, the existing automatic `GITHUB_TOKEN` entrypoint handling is sufficient: add `GITHUB_TOKEN` to the runtime Infisical path and the entrypoint configures Git credentials. Use capability `auth.github` only when a deployment explicitly wants bootstrap-managed GitHub `.netrc` behavior or custom validation around that setup; it uses the same `secret:GITHUB_TOKEN` reference and is not required in addition to automatic `GITHUB_TOKEN` setup.
 
 ## Infisical Setup
 
@@ -149,6 +180,7 @@ INFISICAL_TOKEN=railway_sealed_infisical_token
 INFISICAL_PROJECT_ID=<project-id>
 INFISICAL_ENV=prod
 INFISICAL_SECRET_PATH=/multica-daemon/agent-opencode-1
+# Optional; defaults to https://app.infisical.com/api when omitted.
 INFISICAL_API_URL=https://app.infisical.com/api
 MULTICA_SERVER_URL=https://api.example.com
 MULTICA_APP_URL=https://app.example.com
@@ -297,7 +329,6 @@ Required runtime variables:
 | `INFISICAL_PROJECT_ID`       | Infisical project id                                               |
 | `INFISICAL_ENV`              | Infisical environment slug, for example `prod`                     |
 | `INFISICAL_SECRET_PATH`      | Infisical folder path for this runtime                             |
-| `INFISICAL_API_URL`          | Infisical API URL, defaults to `https://app.infisical.com/api`     |
 | `MULTICA_SERVER_URL`         | Multica backend URL                                                |
 | `MULTICA_APP_URL`            | Multica frontend URL                                               |
 | `MULTICA_DAEMON_ID`          | Stable daemon identity                                             |
@@ -305,6 +336,12 @@ Required runtime variables:
 | `MULTICA_AGENT_RUNTIME_NAME` | Runtime display name in Multica                                    |
 | `MULTICA_WORKSPACES_ROOT`    | Usually `/data/workspaces`                                         |
 | `PORT`                       | Railway healthcheck port                                           |
+
+Optional runtime variables:
+
+| Variable            | Purpose                                                        |
+| ------------------- | -------------------------------------------------------------- |
+| `INFISICAL_API_URL` | Infisical API URL; defaults to `https://app.infisical.com/api` |
 
 Multica daemon options pass through environment variables. Examples:
 
@@ -370,7 +407,7 @@ Check `MULTICA_SERVER_URL`, `MULTICA_DAEMON_ID`, `MULTICA_DAEMON_DEVICE_NAME`, `
 
 **Private GitHub repo clone fails**
 
-Add `GITHUB_TOKEN` to the runtime Infisical path. The entrypoint writes managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions, configures Git's credential helper, and removes the token from the process environment before starting the daemon.
+Add `GITHUB_TOKEN` to the runtime Infisical path. For normal private GitHub HTTPS workspace clones, no capability manifest `auth.github` section is required: the entrypoint writes managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions, configures Git's credential helper, and removes the token from the process environment before starting the daemon. Capability `auth.github` is optional and explicit for bootstrap-managed `.netrc` behavior or custom validation, using the same `secret:GITHUB_TOKEN` reference.
 
 **Task wakeup WebSocket shows `bad handshake`**
 

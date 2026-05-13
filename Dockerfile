@@ -80,10 +80,12 @@ RUN set -eux; \
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/setup_multica.sh /usr/local/bin/setup_multica.sh
 COPY scripts/setup_agent.sh /usr/local/bin/setup_agent.sh
+COPY scripts/capability_bootstrap.sh /usr/local/bin/capability_bootstrap.sh
 COPY scripts/health_proxy.py /usr/local/bin/health_proxy.py
 RUN chmod 755 /usr/local/bin/entrypoint.sh \
   /usr/local/bin/setup_multica.sh \
   /usr/local/bin/setup_agent.sh \
+  /usr/local/bin/capability_bootstrap.sh \
   /usr/local/bin/health_proxy.py
 
 RUN set -eux; \

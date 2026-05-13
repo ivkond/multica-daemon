@@ -9,12 +9,13 @@ Container startup follows one sequence:
 1. Validate required environment variables.
 2. Create persistent directories under `/data`.
 3. Fetch runtime secret from Infisical.
-4. Configure Multica CLI.
-5. Configure selected agent.
-6. Start Railway health proxy on `$PORT`.
-7. Execute `multica daemon start --foreground`.
+4. Run capability bootstrap when `AGENT_CAPABILITIES_JSON` or `AGENT_CAPABILITIES_JSON_B64` is configured.
+5. Configure Multica CLI.
+6. Configure selected agent.
+7. Start Railway health proxy on `$PORT`.
+8. Execute `multica daemon start --foreground`.
 
-`entrypoint.sh` must fail fast when any of steps 1-5 fails.
+`entrypoint.sh` must fail fast when any of steps 1-6 fails.
 
 The daemon is launched through `exec` so `multica daemon` becomes the main container process:
 
@@ -22,7 +23,7 @@ The daemon is launched through `exec` so `multica daemon` becomes the main conta
 exec multica daemon start --foreground
 ```
 
-## Required Runtime Environment
+## Runtime Environment
 
 ```dotenv
 AGENT=opencode
@@ -30,6 +31,7 @@ INFISICAL_TOKEN=railway_sealed_infisical_token
 INFISICAL_PROJECT_ID=<project-id>
 INFISICAL_ENV=prod
 INFISICAL_SECRET_PATH=/multica-daemon/agent-opencode-1
+# Optional; defaults to https://app.infisical.com/api when omitted.
 INFISICAL_API_URL=https://app.infisical.com/api
 MULTICA_SERVER_URL=https://api.example.com
 MULTICA_APP_URL=https://app.example.com
@@ -39,6 +41,8 @@ MULTICA_AGENT_RUNTIME_NAME=OpenCode Runtime 1
 MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
+
+`INFISICAL_API_URL` is optional; when unset, the entrypoint defaults it to `https://app.infisical.com/api`.
 
 `AGENT` must match `MULTICA_IMAGE_AGENT`, the agent baked into the image at build time. If `MULTICA_IMAGE_AGENT` is unset or differs from runtime `AGENT`, startup must fail clearly before Infisical access or setup scripts run.
 
@@ -67,6 +71,8 @@ Runtime directories:
 /data/opencode
 /data/pi
 /data/pi/agent
+/data/capabilities
+/data/capability-shims
 ```
 
 Environment:
@@ -90,6 +96,8 @@ chmod 700 /data/codex
 chmod 700 /data/opencode
 chmod 700 /data/pi
 chmod 700 /data/pi/agent
+chmod 700 /data/capabilities
+chmod 700 /data/capability-shims
 chmod 600 /data/codex/auth.json
 chmod 600 /data/pi/agent/auth.json
 ```
@@ -97,6 +105,8 @@ chmod 600 /data/pi/agent/auth.json
 `/data/codex/auth.json` exists only for `AGENT=codex`.
 
 `/data/pi/agent/auth.json` exists only for `AGENT=pi`.
+
+When capability bootstrap is configured, it may also write `/data/capabilities/manifest.json`, tool-specific env files under `/data/capabilities`, wrapper commands under `/data/capability-shims`, `/data/home/.netrc`, `/data/pi/agent/settings.json`, and `/data/pi/agent/mcp.json`. Because the loaded manifest is persisted at `/data/capabilities/manifest.json`, raw secrets must not be placed anywhere in the manifest, including unknown or future fields. Secret-bearing generated files must use `chmod 600`.
 
 ## Multica Daemon Env Pass-Through
 
@@ -158,6 +168,7 @@ Minimal startup validation:
 - `/data` directories exist and are writable;
 - Infisical export succeeds;
 - selected secret fields are present;
+- optional capability bootstrap succeeds after secret fetch and before Multica setup;
 - optional GitHub token creates managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions;
 - `multica --version` succeeds;
 - `multica login --token` succeeds without printing token values;

@@ -1,0 +1,475 @@
+#!/usr/bin/env bash
+set -euo pipefail
+set +x
+
+readonly CAPABILITIES_ROOT="/data/capabilities"
+readonly SHIMS_ROOT="/data/capability-shims"
+readonly PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-/data/pi/agent}}"
+readonly CAPABILITY_MANIFEST_PATH="${CAPABILITY_MANIFEST_PATH:-/data/capabilities/manifest.json}"
+
+declare -a CLEANUP_TEMP_FILES=()
+
+cleanup_temp_files() {
+  local temp_file
+  for temp_file in "${CLEANUP_TEMP_FILES[@]}"; do
+    [[ -n "$temp_file" ]] && rm -f -- "$temp_file"
+  done
+}
+
+register_temp_file() {
+  CLEANUP_TEMP_FILES+=("$1")
+}
+
+trap cleanup_temp_files EXIT
+
+die() {
+  printf 'capability_bootstrap: %s\n' "$1" >&2
+  exit 1
+}
+
+log() {
+  printf 'capability_bootstrap: %s\n' "$1" >&2
+}
+
+require_command() {
+  local name="$1"
+  command -v "$name" >/dev/null 2>&1 || die "required command is not available: ${name}"
+}
+
+json_type_or_null() {
+  local path="$1"
+  local actual
+  actual="$(jq -r "${path} | type" "$CAPABILITY_MANIFEST_PATH")"
+  printf '%s\n' "${actual%$'\r'}"
+}
+
+require_object_or_absent() {
+  local path="$1"
+  local actual
+  actual="$(json_type_or_null "$path")"
+  [[ "$actual" == "object" || "$actual" == "null" ]] || die "manifest ${path} must be an object when present"
+}
+
+require_array_or_absent() {
+  local path="$1"
+  local actual
+  actual="$(json_type_or_null "$path")"
+  [[ "$actual" == "array" || "$actual" == "null" ]] || die "manifest ${path} must be an array when present"
+}
+
+validate_secret_ref() {
+  local ref="$1"
+  [[ "$ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid secret reference"
+}
+
+resolve_secret_ref() {
+  local ref="$1"
+  local name
+  validate_secret_ref "$ref"
+  name="${ref#secret:}"
+  if [[ -z "${!name:-}" ]]; then
+    die "required secret environment variable is empty: ${name}"
+  fi
+  printf '%s' "${!name}"
+}
+
+shell_quote() {
+  local value="$1"
+  printf '%q' "$value"
+}
+
+validate_safe_command_token() {
+  local kind="$1"
+  local name="$2"
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid ${kind}: ${name}"
+  [[ "$name" != *"/"* ]] || die "${kind} must not contain slash: ${name}"
+  [[ "$name" != "." && "$name" != ".." ]] || die "${kind} must not be dot path: ${name}"
+}
+
+validate_command_name() {
+  validate_safe_command_token "wrapper command name" "$1"
+}
+
+validate_wrapper_name() {
+  local name="$1"
+  validate_command_name "$name"
+  [[ "$name" != "mcp" ]] || die "wrapper command name is reserved for MCP capability namespace: mcp"
+}
+
+validate_pi_agent_dir() {
+  [[ -n "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a non-empty absolute path"
+  [[ "$PI_AGENT_DIR" == /* ]] || die "Pi agent directory must be an absolute path: ${PI_AGENT_DIR}"
+  [[ "$PI_AGENT_DIR" != "/" ]] || die "Pi agent directory must not be root: ${PI_AGENT_DIR}"
+  [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
+  [[ ! -e "$PI_AGENT_DIR" || -d "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a directory: ${PI_AGENT_DIR}"
+}
+
+validate_manifest() {
+  local wrapper_names secret_refs
+
+  jq -e '.version == 1' "$CAPABILITY_MANIFEST_PATH" >/dev/null || die "capability manifest version must be 1"
+
+  require_object_or_absent '.pi'
+  require_array_or_absent '.pi.packages'
+  require_array_or_absent '.pi.skills'
+  require_array_or_absent '.pi.extensions'
+  require_object_or_absent '.cli'
+  require_array_or_absent '.cli.required'
+  require_array_or_absent '.cli.wrappers'
+  require_object_or_absent '.auth'
+  require_object_or_absent '.mcp'
+  require_object_or_absent '.mcp.servers'
+  require_array_or_absent '.validate'
+
+  jq -e '(.pi.packages // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .pi.packages entries must be strings"
+  jq -e '(.pi.skills // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .pi.skills entries must be strings"
+  jq -e '(.pi.extensions // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .pi.extensions entries must be strings"
+  jq -e '(.validate // []) | all(.[]; type == "array" and length > 0 and all(.[]; type == "string"))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .validate entries must be non-empty arrays of strings"
+  jq -e '(.validate // []) | all(.[]; all(.[]; (test("[\u0000-\u001F]") | not)))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .validate entries must not contain control characters"
+
+  jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0) and (.target | type == "string" and startswith("/")) and ((.env // {}) | type == "object") and ((.env // {}) | to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:")))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.wrappers entries must be objects with a non-empty name, absolute target, and env object containing secret refs"
+
+  jq -e '(.cli.wrappers // []) as $wrappers | ($wrappers | map(.name) | length) == ($wrappers | map(.name) | unique | length)' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.wrappers names must be unique"
+
+  jq -e '(.mcp.servers // {}) | to_entries | all(.[]; (.key | type == "string" and test("^[A-Za-z0-9._-]+$") and . != "." and . != "..") and (.value | type == "object") and (.value.command | type == "string" and length > 0 and test("^[A-Za-z0-9._-]+$") and . != "." and . != "..") and ((.value.args // []) | type == "array" and all(.[]; type == "string")) and ((.value.env // {}) | type == "object" and (to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:"))))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .mcp.servers entries must be objects with a safe non-empty command, optional string args array, and env object containing secret refs"
+
+  wrapper_names="$(jq -r '.cli.wrappers[]?.name' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .cli.wrappers names"
+  if [[ -n "$wrapper_names" ]]; then
+    while IFS= read -r name; do
+      name="${name%$'\r'}"
+      validate_wrapper_name "$name"
+    done <<<"$wrapper_names"
+  fi
+
+  secret_refs="$(jq -r '.. | strings | select(startswith("secret:"))' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest secret references"
+  if [[ -n "$secret_refs" ]]; then
+    while IFS= read -r ref; do
+      ref="${ref%$'\r'}"
+      validate_secret_ref "$ref"
+    done <<<"$secret_refs"
+  fi
+}
+
+render_env_wrapper() {
+  local name="$1"
+  local target="$2"
+  local wrapper_dir="${CAPABILITIES_ROOT}/${name}"
+  local env_file="${wrapper_dir}/env"
+  local shim_file="${SHIMS_ROOT}/${name}"
+  local env_tmp shim_tmp env_file_literal target_literal
+  local env_entries key ref value
+
+  validate_wrapper_name "$name"
+  [[ "$target" == /* ]] || die "wrapper target for ${name} must be an absolute path"
+  [[ -x "$target" ]] || die "wrapper target for ${name} is not executable: ${target}"
+  [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
+  [[ ! -L "$SHIMS_ROOT" ]] || die "capability shims root must not be a symlink: ${SHIMS_ROOT}"
+  [[ ! -L "$wrapper_dir" ]] || die "wrapper directory must not be a symlink: ${wrapper_dir}"
+
+  mkdir -p "$wrapper_dir"
+  [[ -d "$wrapper_dir" ]] || die "wrapper directory could not be created: ${wrapper_dir}"
+  [[ ! -L "$env_file" ]] || die "wrapper env file must not be a symlink: ${env_file}"
+  [[ ! -L "$shim_file" ]] || die "wrapper shim file must not be a symlink: ${shim_file}"
+  chmod 700 "$wrapper_dir"
+
+  env_tmp="$(mktemp "${wrapper_dir}/.env.XXXXXX")" || die "failed to create temporary env file for wrapper: ${name}"
+  chmod 600 "$env_tmp"
+
+  env_entries="$(jq -r --arg name "$name" '.cli.wrappers[] | select(.name == $name) | .env // {} | to_entries[] | [.key, .value] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read env entries for wrapper: ${name}"
+
+  if [[ -n "$env_entries" ]]; then
+    while IFS=$'\t' read -r key ref; do
+      [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "invalid env name for wrapper ${name}: ${key}"
+      value="$(resolve_secret_ref "$ref")"
+      printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_tmp"
+    done <<<"$env_entries"
+  fi
+  mv "$env_tmp" "$env_file"
+  chmod 600 "$env_file"
+
+  shim_tmp="$(mktemp "${SHIMS_ROOT}/.${name}.XXXXXX")" || die "failed to create temporary shim for wrapper: ${name}"
+  chmod 700 "$shim_tmp"
+  env_file_literal="$(shell_quote "$env_file")"
+  target_literal="$(shell_quote "$target")"
+  cat >"$shim_tmp" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source ${env_file_literal}
+exec ${target_literal} "\$@"
+EOF
+  mv "$shim_tmp" "$shim_file"
+  chmod 755 "$shim_file"
+}
+
+apply_env_wrappers() {
+  local wrapper_rows name target
+
+  wrapper_rows="$(jq -r '.cli.wrappers[]? | [.name, .target] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .cli.wrappers entries"
+
+  if [[ -n "$wrapper_rows" ]]; then
+    [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
+    [[ ! -L "$SHIMS_ROOT" ]] || die "capability shims root must not be a symlink: ${SHIMS_ROOT}"
+    mkdir -p "$CAPABILITIES_ROOT" "$SHIMS_ROOT"
+    chmod 700 "$CAPABILITIES_ROOT" "$SHIMS_ROOT"
+
+    while IFS=$'\t' read -r name target; do
+      [[ -n "$name" ]] || die "manifest .cli.wrappers entries must include a non-empty name"
+      render_env_wrapper "$name" "$target"
+    done <<<"$wrapper_rows"
+  fi
+}
+
+apply_required_cli_checks() {
+  local command_json
+  local command_name
+  local required_commands
+
+  jq -e '(.cli.required // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.required entries must be strings"
+
+  required_commands="$(jq -c '.cli.required[]?' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .cli.required entries"
+
+  if [[ -n "$required_commands" ]]; then
+    while IFS= read -r command_json; do
+      command_name="$(jq -r . <<<"$command_json")"
+      command_name="${command_name%$'\r'}"
+      validate_command_name "$command_name"
+      command -v "$command_name" >/dev/null 2>&1 || die "declared CLI is not available on PATH: ${command_name}"
+    done <<<"$required_commands"
+  fi
+}
+
+apply_pi_settings() {
+  local has_pi settings_path settings_tmp
+  has_pi="$(jq -r '((.pi.packages // []) + (.pi.skills // []) + (.pi.extensions // [])) | length' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .pi settings"
+  [[ "$has_pi" != "0" ]] || return 0
+
+  validate_pi_agent_dir
+  mkdir -p "$PI_AGENT_DIR"
+  chmod 700 "$PI_AGENT_DIR"
+  settings_path="${PI_AGENT_DIR}/settings.json"
+  [[ ! -L "$settings_path" ]] || die "Pi settings path must not be a symlink: ${settings_path}"
+  [[ ! -e "$settings_path" || -f "$settings_path" ]] || die "Pi settings path must be a regular file when present: ${settings_path}"
+
+  settings_tmp="$(mktemp "${PI_AGENT_DIR}/.settings.XXXXXX")" || die "failed to create temporary Pi settings"
+  chmod 600 "$settings_tmp"
+  jq '{
+    packages: (.pi.packages // []),
+    skills: (.pi.skills // []),
+    extensions: (.pi.extensions // [])
+  }' "$CAPABILITY_MANIFEST_PATH" >"$settings_tmp" \
+    || die "failed to generate Pi settings.json"
+  jq empty "$settings_tmp" >/dev/null || die "generated Pi settings.json is invalid"
+  mv "$settings_tmp" "$settings_path"
+  chmod 600 "$settings_path"
+}
+
+apply_mcp_config() {
+  local server_count server_names server mcp_root server_dir env_file env_tmp env_entries key ref value
+  local command_name mcp_path mcp_tmp
+
+  server_count="$(jq -r '(.mcp.servers // {}) | length' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .mcp.servers"
+  [[ "$server_count" != "0" ]] || return 0
+
+  validate_pi_agent_dir
+  [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
+  mcp_root="${CAPABILITIES_ROOT}/mcp"
+  [[ ! -L "$mcp_root" ]] || die "MCP root directory must not be a symlink: ${mcp_root}"
+  [[ ! -e "$mcp_root" || -d "$mcp_root" ]] || die "MCP root path must be a directory: ${mcp_root}"
+  mkdir -p "$mcp_root" "$PI_AGENT_DIR"
+  chmod 700 "$CAPABILITIES_ROOT" "$mcp_root" "$PI_AGENT_DIR"
+
+  server_names="$(jq -r '(.mcp.servers // {}) | keys[]' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .mcp.servers names"
+  if [[ -n "$server_names" ]]; then
+    while IFS= read -r server; do
+      server="${server%$'\r'}"
+      validate_safe_command_token "MCP server name" "$server"
+      command_name="$(jq -r --arg server "$server" '.mcp.servers[$server].command' "$CAPABILITY_MANIFEST_PATH")" \
+        || die "failed to read MCP server command: ${server}"
+      validate_safe_command_token "MCP server command" "$command_name"
+
+      server_dir="${mcp_root}/${server}"
+      env_file="${server_dir}/env"
+      [[ ! -L "$server_dir" ]] || die "MCP server directory must not be a symlink: ${server_dir}"
+      [[ ! -e "$server_dir" || -d "$server_dir" ]] || die "MCP server path must be a directory: ${server_dir}"
+      mkdir -p "$server_dir"
+      chmod 700 "$server_dir"
+      [[ ! -L "$env_file" ]] || die "MCP env file must not be a symlink: ${env_file}"
+      [[ ! -e "$env_file" || -f "$env_file" ]] || die "MCP env file must be a regular file when present: ${env_file}"
+
+      env_tmp="$(mktemp "${server_dir}/.env.XXXXXX")" || die "failed to create temporary MCP env file for server: ${server}"
+      register_temp_file "$env_tmp"
+      chmod 600 "$env_tmp"
+      env_entries="$(jq -r --arg server "$server" '.mcp.servers[$server].env // {} | to_entries[] | [.key, .value] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
+        || die "failed to read MCP env entries for server: ${server}"
+      if [[ -n "$env_entries" ]]; then
+        while IFS=$'\t' read -r key ref; do
+          key="${key%$'\r'}"
+          ref="${ref%$'\r'}"
+          [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "invalid env name for MCP server ${server}: ${key}"
+          value="$(resolve_secret_ref "$ref")"
+          printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_tmp"
+        done <<<"$env_entries"
+      fi
+      mv "$env_tmp" "$env_file"
+      chmod 600 "$env_file"
+    done <<<"$server_names"
+  fi
+
+  mcp_path="${PI_AGENT_DIR}/mcp.json"
+  [[ ! -L "$mcp_path" ]] || die "Pi MCP config path must not be a symlink: ${mcp_path}"
+  [[ ! -e "$mcp_path" || -f "$mcp_path" ]] || die "Pi MCP config path must be a regular file when present: ${mcp_path}"
+  mcp_tmp="$(mktemp "${PI_AGENT_DIR}/.mcp.XXXXXX")" || die "failed to create temporary Pi MCP config"
+  register_temp_file "$mcp_tmp"
+  chmod 600 "$mcp_tmp"
+  jq --arg root "$CAPABILITIES_ROOT" '{
+    servers: ((.mcp.servers // {}) | with_entries(.value = {
+      command: .value.command,
+      args: (.value.args // []),
+      envFile: ($root + "/mcp/" + .key + "/env")
+    }))
+  }' "$CAPABILITY_MANIFEST_PATH" >"$mcp_tmp" \
+    || die "failed to generate Pi mcp.json"
+  jq empty "$mcp_tmp" >/dev/null || die "generated Pi mcp.json is invalid"
+  mv "$mcp_tmp" "$mcp_path"
+  chmod 600 "$mcp_path"
+}
+
+run_validation_commands() {
+  local count index length validation_args_tmp arg_index
+  local -a validation_args
+
+  count="$(jq -r '(.validate // []) | length' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .validate count"
+  [[ "$count" != "0" ]] || return 0
+
+  for ((index = 0; index < count; index++)); do
+    length="$(jq -r --argjson i "$index" '.validate[$i] | length' "$CAPABILITY_MANIFEST_PATH")" \
+      || die "failed to read manifest .validate command length at index ${index}"
+    [[ "$length" -gt 0 ]] || die "validate[${index}] must not be empty"
+
+    validation_args_tmp="$(mktemp)" || die "failed to create temporary validation args file"
+    register_temp_file "$validation_args_tmp"
+    jq -r --argjson i "$index" '.validate[$i][]' "$CAPABILITY_MANIFEST_PATH" >"$validation_args_tmp" \
+      || die "failed to parse manifest .validate command at index ${index}"
+    mapfile -t validation_args <"$validation_args_tmp" \
+      || die "failed to read manifest .validate command at index ${index}"
+    rm -f -- "$validation_args_tmp"
+    for arg_index in "${!validation_args[@]}"; do
+      validation_args[$arg_index]="${validation_args[$arg_index]%$'\r'}"
+    done
+
+    "${validation_args[@]}" >/dev/null 2>&1 || die "capability validation command failed at index ${index}"
+  done
+}
+
+apply_github_netrc() {
+  local mode token_ref token netrc_path netrc_tmp
+  mode="$(jq -r '.auth.github.mode // empty' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .auth.github.mode"
+  [[ -n "$mode" ]] || return 0
+  [[ "$mode" == "netrc" ]] || die "unsupported auth.github.mode: ${mode}"
+
+  token_ref="$(jq -r '.auth.github.token // empty' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .auth.github.token"
+  [[ -n "$token_ref" ]] || die "auth.github.token is required for netrc mode"
+  [[ "$token_ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "auth.github.token must be a secret reference"
+  token="$(resolve_secret_ref "$token_ref")"
+
+  [[ -n "${HOME:-}" ]] || die "HOME must be set when writing GitHub netrc"
+  [[ "$HOME" == /* ]] || die "HOME must be an absolute path when writing GitHub netrc"
+  [[ ! -L "$HOME" ]] || die "HOME must not be a symlink when writing GitHub netrc: ${HOME}"
+  [[ ! -e "$HOME" || -d "$HOME" ]] || die "HOME must be a directory when writing GitHub netrc"
+  mkdir -p "$HOME"
+  chmod 700 "$HOME"
+  netrc_path="${HOME}/.netrc"
+  [[ ! -L "$netrc_path" ]] || die "GitHub netrc path must not be a symlink: ${netrc_path}"
+
+  netrc_tmp="$(mktemp "${HOME}/.netrc.XXXXXX")" || die "failed to create temporary GitHub netrc"
+  chmod 600 "$netrc_tmp"
+  {
+    printf '# managed by multica-daemon entrypoint\n'
+    printf 'machine github.com\n'
+    printf '  login x-access-token\n'
+    printf '  password %s\n' "$token"
+  } >"$netrc_tmp"
+  mv "$netrc_tmp" "$netrc_path"
+  chmod 600 "$netrc_path"
+}
+
+load_manifest() {
+  local manifest_dir
+  local tmp_manifest
+
+  manifest_dir="$(dirname "$CAPABILITY_MANIFEST_PATH")"
+  tmp_manifest="$(mktemp "${manifest_dir}/.manifest.XXXXXX")" || return 1
+
+  if [[ -n "${AGENT_CAPABILITIES_JSON_B64:-}" ]]; then
+    if ! printf '%s' "$AGENT_CAPABILITIES_JSON_B64" | base64 -d >"$tmp_manifest"; then
+      rm -f "$tmp_manifest"
+      return 1
+    fi
+  elif [[ -n "${AGENT_CAPABILITIES_JSON:-}" ]]; then
+    if ! printf '%s' "$AGENT_CAPABILITIES_JSON" >"$tmp_manifest"; then
+      rm -f "$tmp_manifest"
+      return 1
+    fi
+  else
+    rm -f "$tmp_manifest"
+    return 1
+  fi
+
+  if ! jq empty "$tmp_manifest" >/dev/null; then
+    rm -f "$tmp_manifest"
+    return 2
+  fi
+
+  if ! mv "$tmp_manifest" "$CAPABILITY_MANIFEST_PATH"; then
+    rm -f "$tmp_manifest"
+    return 1
+  fi
+}
+
+main() {
+  if [[ -z "${AGENT_CAPABILITIES_JSON_B64:-}" && -z "${AGENT_CAPABILITIES_JSON:-}" ]]; then
+    log "no capability manifest configured; skipping"
+    exit 0
+  fi
+
+  require_command jq
+
+  mkdir -p "$(dirname "$CAPABILITY_MANIFEST_PATH")"
+
+  if ! load_manifest; then
+    die "capability manifest is not valid JSON or could not be loaded"
+  fi
+
+  validate_manifest
+  apply_required_cli_checks
+  apply_env_wrappers
+  apply_github_netrc
+  apply_pi_settings
+  apply_mcp_config
+  export PATH="${SHIMS_ROOT}:${PATH}"
+  run_validation_commands
+
+  log "capability bootstrap completed"
+}
+
+main "$@"

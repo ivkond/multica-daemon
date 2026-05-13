@@ -13,8 +13,11 @@ INFISICAL_TOKEN=railway_sealed_infisical_token
 INFISICAL_PROJECT_ID=<project-id>
 INFISICAL_ENV=prod
 INFISICAL_SECRET_PATH=/multica-daemon/agent-codex-1
+# Optional; defaults to https://app.infisical.com/api when omitted.
 INFISICAL_API_URL=https://app.infisical.com/api
 ```
+
+`INFISICAL_API_URL` is optional; when unset, the entrypoint defaults it to `https://app.infisical.com/api`.
 
 `INFISICAL_TOKEN` requirements:
 
@@ -162,7 +165,7 @@ The token must not be printed, persisted outside Multica CLI auth storage, or wr
 
 ## GitHub Credential Handling
 
-`GITHUB_TOKEN` is optional and exists only for daemon-side cloning of private GitHub repositories over HTTPS.
+`GITHUB_TOKEN` is optional and exists only for daemon-side cloning of private GitHub repositories over HTTPS. For normal private GitHub HTTPS workspace clones, the automatic entrypoint handling below is the recommended path and no capability `auth.github` manifest section is required.
 
 Runtime behavior:
 
@@ -174,6 +177,22 @@ Runtime behavior:
 - remove the managed credential files and unset the Git credential helper on startup when the secret is no longer present.
 
 The token should be a fine-grained GitHub PAT scoped to the specific repo with `Contents: Read-only`.
+
+Capability bootstrap `auth.github` is optional and explicit for deployments that want bootstrap-managed GitHub `.netrc` behavior or custom validation. It uses the same runtime secret reference, usually `secret:GITHUB_TOKEN`, and should not be documented or configured as an additional requirement for normal private repo cloning.
+
+## Capability Manifest Handling
+
+Capability manifests contain secret references, not raw values. Secret-bearing manifest fields use `secret:NAME` references that resolve from environment variables populated after the secret-store fetch step. The loaded manifest is persisted at `/data/capabilities/manifest.json`, so raw secrets must not be placed anywhere in the manifest, including unknown or future fields.
+
+Runtime behavior:
+
+- prefer `AGENT_CAPABILITIES_JSON_B64` over `AGENT_CAPABILITIES_JSON` when both are set;
+- reject invalid manifests before Multica setup;
+- materialize secrets only into tool-specific generated files;
+- write generated secret files with `chmod 600`;
+- keep secret-bearing generated files under `/data/capabilities` or HOME-only auth files such as `/data/home/.netrc`;
+- suppress validation command output by redirecting stdout and stderr away from logs;
+- do not install operating-system packages at runtime from manifest declarations.
 
 ## Logging Rules
 
@@ -200,6 +219,8 @@ Forbidden:
 - `GITHUB_TOKEN_FROM_SECRET_STORE`;
 - decoded `auth.json`;
 - raw Infisical export response;
+- raw capability manifest secret values;
+- capability validation command output;
 - provider API keys.
 
 ## MVP Security Boundaries
