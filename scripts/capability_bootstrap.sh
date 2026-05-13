@@ -67,6 +67,7 @@ validate_command_name() {
   local name="$1"
   [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid wrapper command name: ${name}"
   [[ "$name" != *"/"* ]] || die "wrapper command name must not contain slash: ${name}"
+  [[ "$name" != "." && "$name" != ".." ]] || die "wrapper command name must not be dot path: ${name}"
 }
 
 validate_manifest() {
@@ -88,6 +89,9 @@ validate_manifest() {
 
   jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0) and (.target | type == "string" and startswith("/")) and ((.env // {}) | type == "object") and ((.env // {}) | to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:")))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .cli.wrappers entries must be objects with a non-empty name, absolute target, and env object containing secret refs"
+
+  jq -e '(.cli.wrappers // []) as $wrappers | ($wrappers | map(.name) | length) == ($wrappers | map(.name) | unique | length)' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.wrappers names must be unique"
 
   wrapper_names="$(jq -r '.cli.wrappers[]?.name' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read manifest .cli.wrappers names"
@@ -111,18 +115,27 @@ validate_manifest() {
 render_env_wrapper() {
   local name="$1"
   local target="$2"
-  local env_file="${CAPABILITIES_ROOT}/${name}/env"
+  local wrapper_dir="${CAPABILITIES_ROOT}/${name}"
+  local env_file="${wrapper_dir}/env"
   local shim_file="${SHIMS_ROOT}/${name}"
+  local env_tmp shim_tmp env_file_literal target_literal
   local env_entries key ref value
 
   validate_command_name "$name"
   [[ "$target" == /* ]] || die "wrapper target for ${name} must be an absolute path"
   [[ -x "$target" ]] || die "wrapper target for ${name} is not executable: ${target}"
+  [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
+  [[ ! -L "$SHIMS_ROOT" ]] || die "capability shims root must not be a symlink: ${SHIMS_ROOT}"
+  [[ ! -L "$wrapper_dir" ]] || die "wrapper directory must not be a symlink: ${wrapper_dir}"
 
-  mkdir -p "${CAPABILITIES_ROOT}/${name}"
-  chmod 700 "${CAPABILITIES_ROOT}/${name}"
-  : >"$env_file"
-  chmod 600 "$env_file"
+  mkdir -p "$wrapper_dir"
+  [[ -d "$wrapper_dir" ]] || die "wrapper directory could not be created: ${wrapper_dir}"
+  [[ ! -L "$env_file" ]] || die "wrapper env file must not be a symlink: ${env_file}"
+  [[ ! -L "$shim_file" ]] || die "wrapper shim file must not be a symlink: ${shim_file}"
+  chmod 700 "$wrapper_dir"
+
+  env_tmp="$(mktemp "${wrapper_dir}/.env.XXXXXX")" || die "failed to create temporary env file for wrapper: ${name}"
+  chmod 600 "$env_tmp"
 
   env_entries="$(jq -r --arg name "$name" '.cli.wrappers[] | select(.name == $name) | .env // {} | to_entries[] | [.key, .value] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read env entries for wrapper: ${name}"
@@ -131,16 +144,23 @@ render_env_wrapper() {
     while IFS=$'\t' read -r key ref; do
       [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "invalid env name for wrapper ${name}: ${key}"
       value="$(resolve_secret_ref "$ref")"
-      printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_file"
+      printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_tmp"
     done <<<"$env_entries"
   fi
+  mv "$env_tmp" "$env_file"
+  chmod 600 "$env_file"
 
-  cat >"$shim_file" <<EOF
+  shim_tmp="$(mktemp "${SHIMS_ROOT}/.${name}.XXXXXX")" || die "failed to create temporary shim for wrapper: ${name}"
+  chmod 700 "$shim_tmp"
+  env_file_literal="$(shell_quote "$env_file")"
+  target_literal="$(shell_quote "$target")"
+  cat >"$shim_tmp" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-source "$env_file"
-exec "$target" "\$@"
+source ${env_file_literal}
+exec ${target_literal} "\$@"
 EOF
+  mv "$shim_tmp" "$shim_file"
   chmod 755 "$shim_file"
 }
 
