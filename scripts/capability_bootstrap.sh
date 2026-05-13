@@ -178,6 +178,11 @@ apply_env_wrappers() {
     || die "failed to read manifest .cli.wrappers entries"
 
   if [[ -n "$wrapper_rows" ]]; then
+    [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
+    [[ ! -L "$SHIMS_ROOT" ]] || die "capability shims root must not be a symlink: ${SHIMS_ROOT}"
+    mkdir -p "$CAPABILITIES_ROOT" "$SHIMS_ROOT"
+    chmod 700 "$CAPABILITIES_ROOT" "$SHIMS_ROOT"
+
     while IFS=$'\t' read -r name target; do
       [[ -n "$name" ]] || die "manifest .cli.wrappers entries must include a non-empty name"
       render_env_wrapper "$name" "$target"
@@ -212,12 +217,16 @@ apply_pi_settings() {
     || die "failed to read manifest .pi settings"
   [[ "$has_pi" != "0" ]] || return 0
 
+  [[ -n "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a non-empty absolute path"
+  [[ "$PI_AGENT_DIR" == /* ]] || die "Pi agent directory must be an absolute path: ${PI_AGENT_DIR}"
+  [[ "$PI_AGENT_DIR" != "/" ]] || die "Pi agent directory must not be root: ${PI_AGENT_DIR}"
   [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
+  [[ ! -e "$PI_AGENT_DIR" || -d "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a directory: ${PI_AGENT_DIR}"
   mkdir -p "$PI_AGENT_DIR"
-  [[ -d "$PI_AGENT_DIR" ]] || die "Pi agent directory could not be created: ${PI_AGENT_DIR}"
   chmod 700 "$PI_AGENT_DIR"
   settings_path="${PI_AGENT_DIR}/settings.json"
   [[ ! -L "$settings_path" ]] || die "Pi settings path must not be a symlink: ${settings_path}"
+  [[ ! -e "$settings_path" || -f "$settings_path" ]] || die "Pi settings path must be a regular file when present: ${settings_path}"
 
   settings_tmp="$(mktemp "${PI_AGENT_DIR}/.settings.XXXXXX")" || die "failed to create temporary Pi settings"
   chmod 600 "$settings_tmp"
@@ -306,9 +315,7 @@ main() {
 
   require_command jq
 
-  [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
-  mkdir -p "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR" "$(dirname "$CAPABILITY_MANIFEST_PATH")"
-  chmod 700 "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR"
+  mkdir -p "$(dirname "$CAPABILITY_MANIFEST_PATH")"
 
   if ! load_manifest; then
     die "capability manifest is not valid JSON or could not be loaded"
