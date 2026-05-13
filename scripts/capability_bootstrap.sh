@@ -22,17 +22,36 @@ require_command() {
 }
 
 load_manifest() {
+  local manifest_dir
+  local tmp_manifest
+
+  manifest_dir="$(dirname "$CAPABILITY_MANIFEST_PATH")"
+  tmp_manifest="$(mktemp "${manifest_dir}/.manifest.XXXXXX")" || return 1
+
   if [[ -n "${AGENT_CAPABILITIES_JSON_B64:-}" ]]; then
-    printf '%s' "$AGENT_CAPABILITIES_JSON_B64" | base64 -d >"$CAPABILITY_MANIFEST_PATH"
-    return 0
+    if ! printf '%s' "$AGENT_CAPABILITIES_JSON_B64" | base64 -d >"$tmp_manifest"; then
+      rm -f "$tmp_manifest"
+      return 1
+    fi
+  elif [[ -n "${AGENT_CAPABILITIES_JSON:-}" ]]; then
+    if ! printf '%s' "$AGENT_CAPABILITIES_JSON" >"$tmp_manifest"; then
+      rm -f "$tmp_manifest"
+      return 1
+    fi
+  else
+    rm -f "$tmp_manifest"
+    return 1
   fi
 
-  if [[ -n "${AGENT_CAPABILITIES_JSON:-}" ]]; then
-    printf '%s' "$AGENT_CAPABILITIES_JSON" >"$CAPABILITY_MANIFEST_PATH"
-    return 0
+  if ! jq empty "$tmp_manifest" >/dev/null; then
+    rm -f "$tmp_manifest"
+    return 2
   fi
 
-  return 1
+  if ! mv "$tmp_manifest" "$CAPABILITY_MANIFEST_PATH"; then
+    rm -f "$tmp_manifest"
+    return 1
+  fi
 }
 
 main() {
@@ -46,9 +65,10 @@ main() {
   mkdir -p "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR" "$(dirname "$CAPABILITY_MANIFEST_PATH")"
   chmod 700 "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR"
 
-  load_manifest || die "failed to load capability manifest"
+  if ! load_manifest; then
+    die "capability manifest is not valid JSON or could not be loaded"
+  fi
 
-  jq empty "$CAPABILITY_MANIFEST_PATH" >/dev/null || die "capability manifest is not valid JSON"
   log "capability manifest loaded"
 }
 
