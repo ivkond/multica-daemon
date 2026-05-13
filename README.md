@@ -78,13 +78,19 @@ Minimal manifest example:
   "cli": {
     "required": ["git"]
   },
+  "auth": {
+    "github": {
+      "mode": "netrc",
+      "token": "secret:GITHUB_TOKEN"
+    }
+  },
   "pi": {
     "packages": ["npm:@org/pi-agent-toolbox@1.0.0"]
   }
 }
 ```
 
-System binaries listed in `cli.required` still need to be present in the selected image flavor unless they are otherwise explicitly preinstalled. Bootstrap does not install operating-system packages at runtime. Secrets are materialized only into tool-specific files with restrictive permissions, such as generated capability env files or `/data/home/.netrc`.
+System binaries listed in `cli.required` still need to be present in the selected image flavor unless they are otherwise explicitly preinstalled. Bootstrap does not install operating-system packages at runtime. Packages listed in `pi.packages` are installed by the Pi runtime bootstrap. Secrets are materialized only into tool-specific files with restrictive permissions, such as generated capability env files or `/data/home/.netrc`.
 
 For normal private GitHub HTTPS workspace clones, the existing automatic `GITHUB_TOKEN` entrypoint handling is sufficient: add `GITHUB_TOKEN` to the runtime Infisical path and the entrypoint configures Git credentials. Use capability `auth.github` only when a deployment explicitly wants bootstrap-managed GitHub `.netrc` behavior or custom validation around that setup; it uses the same `secret:GITHUB_TOKEN` reference and is not required in addition to automatic `GITHUB_TOKEN` setup.
 
