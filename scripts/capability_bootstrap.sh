@@ -44,7 +44,7 @@ require_array_or_absent() {
 
 validate_secret_ref() {
   local ref="$1"
-  [[ "$ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid secret reference: ${ref}"
+  [[ "$ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid secret reference"
 }
 
 resolve_secret_ref() {
@@ -213,7 +213,9 @@ apply_github_netrc() {
   token="$(resolve_secret_ref "$token_ref")"
 
   [[ -n "${HOME:-}" ]] || die "HOME must be set when writing GitHub netrc"
+  [[ "$HOME" == /* ]] || die "HOME must be an absolute path when writing GitHub netrc"
   [[ ! -L "$HOME" ]] || die "HOME must not be a symlink when writing GitHub netrc: ${HOME}"
+  [[ ! -e "$HOME" || -d "$HOME" ]] || die "HOME must be a directory when writing GitHub netrc"
   mkdir -p "$HOME"
   chmod 700 "$HOME"
   netrc_path="${HOME}/.netrc"
