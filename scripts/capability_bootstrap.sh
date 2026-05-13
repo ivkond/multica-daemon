@@ -199,6 +199,31 @@ apply_required_cli_checks() {
   fi
 }
 
+apply_github_netrc() {
+  local mode token_ref token netrc_path
+  mode="$(jq -r '.auth.github.mode // empty' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .auth.github.mode"
+  [[ -n "$mode" ]] || return 0
+  [[ "$mode" == "netrc" ]] || die "unsupported auth.github.mode: ${mode}"
+
+  token_ref="$(jq -r '.auth.github.token // empty' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .auth.github.token"
+  [[ -n "$token_ref" ]] || die "auth.github.token is required for netrc mode"
+  token="$(resolve_secret_ref "$token_ref")"
+
+  mkdir -p "$HOME"
+  [[ ! -L "$HOME" ]] || die "HOME must not be a symlink when writing GitHub netrc: ${HOME}"
+  chmod 700 "$HOME"
+  netrc_path="${HOME}/.netrc"
+  [[ ! -L "$netrc_path" ]] || die "GitHub netrc path must not be a symlink: ${netrc_path}"
+  {
+    printf 'machine github.com\n'
+    printf '  login x-access-token\n'
+    printf '  password %s\n' "$token"
+  } >"$netrc_path"
+  chmod 600 "$netrc_path"
+}
+
 load_manifest() {
   local manifest_dir
   local tmp_manifest
@@ -250,6 +275,7 @@ main() {
   validate_manifest
   apply_required_cli_checks
   apply_env_wrappers
+  apply_github_netrc
   export PATH="${SHIMS_ROOT}:${PATH}"
 
   log "capability manifest loaded"
