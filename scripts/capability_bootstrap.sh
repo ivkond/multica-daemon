@@ -90,6 +90,12 @@ validate_command_name() {
   validate_safe_command_token "wrapper command name" "$1"
 }
 
+validate_wrapper_name() {
+  local name="$1"
+  validate_command_name "$name"
+  [[ "$name" != "mcp" ]] || die "wrapper command name is reserved for MCP capability namespace: mcp"
+}
+
 validate_pi_agent_dir() {
   [[ -n "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a non-empty absolute path"
   [[ "$PI_AGENT_DIR" == /* ]] || die "Pi agent directory must be an absolute path: ${PI_AGENT_DIR}"
@@ -136,7 +142,7 @@ validate_manifest() {
   if [[ -n "$wrapper_names" ]]; then
     while IFS= read -r name; do
       name="${name%$'\r'}"
-      validate_command_name "$name"
+      validate_wrapper_name "$name"
     done <<<"$wrapper_names"
   fi
 
@@ -159,7 +165,7 @@ render_env_wrapper() {
   local env_tmp shim_tmp env_file_literal target_literal
   local env_entries key ref value
 
-  validate_command_name "$name"
+  validate_wrapper_name "$name"
   [[ "$target" == /* ]] || die "wrapper target for ${name} must be an absolute path"
   [[ -x "$target" ]] || die "wrapper target for ${name} is not executable: ${target}"
   [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
