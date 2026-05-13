@@ -4,7 +4,7 @@ set +x
 
 readonly CAPABILITIES_ROOT="/data/capabilities"
 readonly SHIMS_ROOT="/data/capability-shims"
-readonly PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-/data/pi/agent}"
+readonly PI_AGENT_DIR="${PI_AGENT_DIR:-/data/pi/agent}"
 readonly CAPABILITY_MANIFEST_PATH="${CAPABILITY_MANIFEST_PATH:-/data/capabilities/manifest.json}"
 
 die() {
@@ -36,12 +36,12 @@ load_manifest() {
 }
 
 main() {
-  require_command jq
-
   if [[ -z "${AGENT_CAPABILITIES_JSON_B64:-}" && -z "${AGENT_CAPABILITIES_JSON:-}" ]]; then
     log "no capability manifest configured; skipping"
     exit 0
   fi
+
+  require_command jq
 
   mkdir -p "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR" "$(dirname "$CAPABILITY_MANIFEST_PATH")"
   chmod 700 "$CAPABILITIES_ROOT" "$SHIMS_ROOT" "$PI_AGENT_DIR"
