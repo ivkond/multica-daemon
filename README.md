@@ -68,7 +68,7 @@ Do not put secret values in committed files. Store only the Infisical bootstrap 
 
 Capability bootstrap lets a deployment declare tool checks and deploy-time auth/config preparation before the daemon starts. See the [capability bootstrap specification](docs/capability-bootstrap-spec.md) for the full manifest contract.
 
-Provide the manifest with `AGENT_CAPABILITIES_JSON` or base64-encoded `AGENT_CAPABILITIES_JSON_B64`. Secret-bearing fields use `secret:NAME` references that resolve from the runtime secret environment after Infisical fetch; do not put raw secret values in the manifest.
+Provide the manifest with `AGENT_CAPABILITIES_JSON` or base64-encoded `AGENT_CAPABILITIES_JSON_B64`. The loaded manifest is persisted at `/data/capabilities/manifest.json`, so never put raw secret values anywhere in it, including unknown or future fields. Secret-bearing fields use `secret:NAME` references that resolve from the runtime secret environment after Infisical fetch.
 
 Minimal manifest example:
 
@@ -78,12 +78,6 @@ Minimal manifest example:
   "cli": {
     "required": ["git"]
   },
-  "auth": {
-    "github": {
-      "mode": "netrc",
-      "token": "secret:GITHUB_TOKEN"
-    }
-  },
   "pi": {
     "packages": ["npm:@org/pi-agent-toolbox@1.0.0"]
   }
@@ -91,6 +85,8 @@ Minimal manifest example:
 ```
 
 System binaries listed in `cli.required` still need to be present in the selected image flavor unless they are otherwise explicitly preinstalled. Bootstrap does not install operating-system packages at runtime. Secrets are materialized only into tool-specific files with restrictive permissions, such as generated capability env files or `/data/home/.netrc`.
+
+For normal private GitHub HTTPS workspace clones, the existing automatic `GITHUB_TOKEN` entrypoint handling is sufficient: add `GITHUB_TOKEN` to the runtime Infisical path and the entrypoint configures Git credentials. Use capability `auth.github` only when a deployment explicitly wants bootstrap-managed GitHub `.netrc` behavior or custom validation around that setup; it uses the same `secret:GITHUB_TOKEN` reference and is not required in addition to automatic `GITHUB_TOKEN` setup.
 
 ## Infisical Setup
 
@@ -178,6 +174,7 @@ INFISICAL_TOKEN=railway_sealed_infisical_token
 INFISICAL_PROJECT_ID=<project-id>
 INFISICAL_ENV=prod
 INFISICAL_SECRET_PATH=/multica-daemon/agent-opencode-1
+# Optional; defaults to https://app.infisical.com/api when omitted.
 INFISICAL_API_URL=https://app.infisical.com/api
 MULTICA_SERVER_URL=https://api.example.com
 MULTICA_APP_URL=https://app.example.com
@@ -326,7 +323,6 @@ Required runtime variables:
 | `INFISICAL_PROJECT_ID`       | Infisical project id                                               |
 | `INFISICAL_ENV`              | Infisical environment slug, for example `prod`                     |
 | `INFISICAL_SECRET_PATH`      | Infisical folder path for this runtime                             |
-| `INFISICAL_API_URL`          | Infisical API URL, defaults to `https://app.infisical.com/api`     |
 | `MULTICA_SERVER_URL`         | Multica backend URL                                                |
 | `MULTICA_APP_URL`            | Multica frontend URL                                               |
 | `MULTICA_DAEMON_ID`          | Stable daemon identity                                             |
@@ -334,6 +330,12 @@ Required runtime variables:
 | `MULTICA_AGENT_RUNTIME_NAME` | Runtime display name in Multica                                    |
 | `MULTICA_WORKSPACES_ROOT`    | Usually `/data/workspaces`                                         |
 | `PORT`                       | Railway healthcheck port                                           |
+
+Optional runtime variables:
+
+| Variable            | Purpose                                                        |
+| ------------------- | -------------------------------------------------------------- |
+| `INFISICAL_API_URL` | Infisical API URL; defaults to `https://app.infisical.com/api` |
 
 Multica daemon options pass through environment variables. Examples:
 
@@ -399,7 +401,7 @@ Check `MULTICA_SERVER_URL`, `MULTICA_DAEMON_ID`, `MULTICA_DAEMON_DEVICE_NAME`, `
 
 **Private GitHub repo clone fails**
 
-Add `GITHUB_TOKEN` to the runtime Infisical path. The entrypoint writes managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions, configures Git's credential helper, and removes the token from the process environment before starting the daemon.
+Add `GITHUB_TOKEN` to the runtime Infisical path. For normal private GitHub HTTPS workspace clones, no capability manifest `auth.github` section is required: the entrypoint writes managed `/data/home/.netrc` and `/data/home/.git-credentials` files with `0600` permissions, configures Git's credential helper, and removes the token from the process environment before starting the daemon. Capability `auth.github` is optional and explicit for bootstrap-managed `.netrc` behavior or custom validation, using the same `secret:GITHUB_TOKEN` reference.
 
 **Task wakeup WebSocket shows `bad handshake`**
 

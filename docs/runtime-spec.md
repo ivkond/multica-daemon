@@ -23,7 +23,7 @@ The daemon is launched through `exec` so `multica daemon` becomes the main conta
 exec multica daemon start --foreground
 ```
 
-## Required Runtime Environment
+## Runtime Environment
 
 ```dotenv
 AGENT=opencode
@@ -31,6 +31,7 @@ INFISICAL_TOKEN=railway_sealed_infisical_token
 INFISICAL_PROJECT_ID=<project-id>
 INFISICAL_ENV=prod
 INFISICAL_SECRET_PATH=/multica-daemon/agent-opencode-1
+# Optional; defaults to https://app.infisical.com/api when omitted.
 INFISICAL_API_URL=https://app.infisical.com/api
 MULTICA_SERVER_URL=https://api.example.com
 MULTICA_APP_URL=https://app.example.com
@@ -40,6 +41,8 @@ MULTICA_AGENT_RUNTIME_NAME=OpenCode Runtime 1
 MULTICA_WORKSPACES_ROOT=/data/workspaces
 PORT=8080
 ```
+
+`INFISICAL_API_URL` is optional; when unset, the entrypoint defaults it to `https://app.infisical.com/api`.
 
 `AGENT` must match `MULTICA_IMAGE_AGENT`, the agent baked into the image at build time. If `MULTICA_IMAGE_AGENT` is unset or differs from runtime `AGENT`, startup must fail clearly before Infisical access or setup scripts run.
 
@@ -103,7 +106,7 @@ chmod 600 /data/pi/agent/auth.json
 
 `/data/pi/agent/auth.json` exists only for `AGENT=pi`.
 
-When capability bootstrap is configured, it may also write `/data/capabilities/manifest.json`, tool-specific env files under `/data/capabilities`, wrapper commands under `/data/capability-shims`, `/data/home/.netrc`, `/data/pi/agent/settings.json`, and `/data/pi/agent/mcp.json`. Secret-bearing generated files must use `chmod 600`.
+When capability bootstrap is configured, it may also write `/data/capabilities/manifest.json`, tool-specific env files under `/data/capabilities`, wrapper commands under `/data/capability-shims`, `/data/home/.netrc`, `/data/pi/agent/settings.json`, and `/data/pi/agent/mcp.json`. Because the loaded manifest is persisted at `/data/capabilities/manifest.json`, raw secrets must not be placed anywhere in the manifest, including unknown or future fields. Secret-bearing generated files must use `chmod 600`.
 
 ## Multica Daemon Env Pass-Through
 

@@ -16,7 +16,7 @@ The manifest is optional. When neither manifest variable is configured, bootstra
 - `AGENT_CAPABILITIES_JSON`: raw JSON manifest.
 - `secret:NAME` references: manifest values that resolve from runtime environment variable `NAME` after the secret-store fetch step. Secret names must be valid environment variable names.
 
-The manifest must be JSON with `"version": 1`.
+The manifest must be JSON with `"version": 1`. The loaded manifest is persisted at `/data/capabilities/manifest.json`, so raw secrets must not be placed anywhere in the manifest, including unknown or future fields. Use `secret:NAME` references for every secret-bearing value.
 
 ## Minimal Example
 
@@ -25,12 +25,6 @@ The manifest must be JSON with `"version": 1`.
   "version": 1,
   "cli": {
     "required": ["git"]
-  },
-  "auth": {
-    "github": {
-      "mode": "netrc",
-      "token": "secret:GITHUB_TOKEN"
-    }
   },
   "pi": {
     "packages": ["npm:@org/pi-agent-toolbox@1.0.0"]
@@ -74,6 +68,8 @@ Bootstrap writes a tool-specific env file and a shim that sources that env file 
 
 Supports `mode: "netrc"`. The `token` field must be a `secret:NAME` reference. Bootstrap writes `${HOME}/.netrc` for GitHub HTTPS access using login `x-access-token`.
 
+For normal private GitHub HTTPS workspace clones, prefer the entrypoint's automatic `GITHUB_TOKEN` handling; no capability `auth.github` section is required. Use `auth.github` only when a manifest explicitly wants bootstrap-managed GitHub `.netrc` behavior or validation commands around that setup. It should reference the same runtime secret, usually `"token": "secret:GITHUB_TOKEN"`.
+
 ### `pi`
 
 Generates Pi settings when any of these arrays are present and non-empty:
@@ -100,7 +96,7 @@ Array of command arrays run after rendering wrappers, auth, Pi settings, and MCP
 
 ## Security Rules
 
-- Manifests must contain secret references, not raw secret values.
+- Manifests must contain secret references, not raw secret values. The manifest is persisted at `/data/capabilities/manifest.json`, so raw secrets must not appear anywhere in it, including unknown or future fields.
 - Secrets are not logged by bootstrap.
 - Secrets are materialized only into tool-specific files, such as `/data/capabilities/<wrapper>/env`, `/data/capabilities/mcp/<server>/env`, or `/data/home/.netrc`.
 - Generated secret-bearing files use `600` permissions.
