@@ -78,8 +78,8 @@ case "$normalized_workspaces_root" in
     ;;
 esac
 
-mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR"
-chmod 700 "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR"
+mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR" "/data/capabilities" "/data/capability-shims"
+chmod 700 "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR" "/data/capabilities" "/data/capability-shims"
 [[ -w "$HOME" ]] || die "HOME is not writable"
 [[ -w "$MULTICA_WORKSPACES_ROOT" ]] || die "MULTICA_WORKSPACES_ROOT is not writable"
 [[ -w "$CODEX_HOME" ]] || die "CODEX_HOME is not writable"
