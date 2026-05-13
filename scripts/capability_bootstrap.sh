@@ -63,11 +63,24 @@ shell_quote() {
   printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
 }
 
+validate_safe_command_token() {
+  local kind="$1"
+  local name="$2"
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid ${kind}: ${name}"
+  [[ "$name" != *"/"* ]] || die "${kind} must not contain slash: ${name}"
+  [[ "$name" != "." && "$name" != ".." ]] || die "${kind} must not be dot path: ${name}"
+}
+
 validate_command_name() {
-  local name="$1"
-  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid wrapper command name: ${name}"
-  [[ "$name" != *"/"* ]] || die "wrapper command name must not contain slash: ${name}"
-  [[ "$name" != "." && "$name" != ".." ]] || die "wrapper command name must not be dot path: ${name}"
+  validate_safe_command_token "wrapper command name" "$1"
+}
+
+validate_pi_agent_dir() {
+  [[ -n "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a non-empty absolute path"
+  [[ "$PI_AGENT_DIR" == /* ]] || die "Pi agent directory must be an absolute path: ${PI_AGENT_DIR}"
+  [[ "$PI_AGENT_DIR" != "/" ]] || die "Pi agent directory must not be root: ${PI_AGENT_DIR}"
+  [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
+  [[ ! -e "$PI_AGENT_DIR" || -d "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a directory: ${PI_AGENT_DIR}"
 }
 
 validate_manifest() {
@@ -99,6 +112,9 @@ validate_manifest() {
 
   jq -e '(.cli.wrappers // []) as $wrappers | ($wrappers | map(.name) | length) == ($wrappers | map(.name) | unique | length)' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .cli.wrappers names must be unique"
+
+  jq -e '(.mcp.servers // {}) | to_entries | all(.[]; (.key | type == "string" and test("^[A-Za-z0-9._-]+$") and . != "." and . != "..") and (.value | type == "object") and (.value.command | type == "string" and length > 0 and test("^[A-Za-z0-9._-]+$") and . != "." and . != "..") and ((.value.args // []) | type == "array" and all(.[]; type == "string")) and ((.value.env // {}) | type == "object" and (to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:"))))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .mcp.servers entries must be objects with a safe non-empty command, optional string args array, and env object containing secret refs"
 
   wrapper_names="$(jq -r '.cli.wrappers[]?.name' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read manifest .cli.wrappers names"
@@ -217,11 +233,7 @@ apply_pi_settings() {
     || die "failed to read manifest .pi settings"
   [[ "$has_pi" != "0" ]] || return 0
 
-  [[ -n "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a non-empty absolute path"
-  [[ "$PI_AGENT_DIR" == /* ]] || die "Pi agent directory must be an absolute path: ${PI_AGENT_DIR}"
-  [[ "$PI_AGENT_DIR" != "/" ]] || die "Pi agent directory must not be root: ${PI_AGENT_DIR}"
-  [[ ! -L "$PI_AGENT_DIR" ]] || die "Pi agent directory must not be a symlink: ${PI_AGENT_DIR}"
-  [[ ! -e "$PI_AGENT_DIR" || -d "$PI_AGENT_DIR" ]] || die "Pi agent directory must be a directory: ${PI_AGENT_DIR}"
+  validate_pi_agent_dir
   mkdir -p "$PI_AGENT_DIR"
   chmod 700 "$PI_AGENT_DIR"
   settings_path="${PI_AGENT_DIR}/settings.json"
@@ -239,6 +251,72 @@ apply_pi_settings() {
   jq empty "$settings_tmp" >/dev/null || die "generated Pi settings.json is invalid"
   mv "$settings_tmp" "$settings_path"
   chmod 600 "$settings_path"
+}
+
+apply_mcp_config() {
+  local server_count server_names server server_dir env_file env_tmp env_entries key ref value
+  local command_name mcp_path mcp_tmp
+
+  server_count="$(jq -r '(.mcp.servers // {}) | length' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .mcp.servers"
+  [[ "$server_count" != "0" ]] || return 0
+
+  validate_pi_agent_dir
+  [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
+  mkdir -p "$CAPABILITIES_ROOT" "$PI_AGENT_DIR"
+  chmod 700 "$CAPABILITIES_ROOT" "$PI_AGENT_DIR"
+
+  server_names="$(jq -r '(.mcp.servers // {}) | keys[]' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .mcp.servers names"
+  if [[ -n "$server_names" ]]; then
+    while IFS= read -r server; do
+      server="${server%$'\r'}"
+      validate_safe_command_token "MCP server name" "$server"
+      command_name="$(jq -r --arg server "$server" '.mcp.servers[$server].command' "$CAPABILITY_MANIFEST_PATH")" \
+        || die "failed to read MCP server command: ${server}"
+      validate_safe_command_token "MCP server command" "$command_name"
+
+      server_dir="${CAPABILITIES_ROOT}/mcp-${server}"
+      env_file="${server_dir}/env"
+      [[ ! -L "$server_dir" ]] || die "MCP server directory must not be a symlink: ${server_dir}"
+      [[ ! -e "$server_dir" || -d "$server_dir" ]] || die "MCP server path must be a directory: ${server_dir}"
+      mkdir -p "$server_dir"
+      chmod 700 "$server_dir"
+      [[ ! -L "$env_file" ]] || die "MCP env file must not be a symlink: ${env_file}"
+      [[ ! -e "$env_file" || -f "$env_file" ]] || die "MCP env file must be a regular file when present: ${env_file}"
+
+      env_tmp="$(mktemp "${server_dir}/.env.XXXXXX")" || die "failed to create temporary MCP env file for server: ${server}"
+      chmod 600 "$env_tmp"
+      env_entries="$(jq -r --arg server "$server" '.mcp.servers[$server].env // {} | to_entries[] | [.key, .value] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
+        || die "failed to read MCP env entries for server: ${server}"
+      if [[ -n "$env_entries" ]]; then
+        while IFS=$'\t' read -r key ref; do
+          [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "invalid env name for MCP server ${server}: ${key}"
+          value="$(resolve_secret_ref "$ref")"
+          printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_tmp"
+        done <<<"$env_entries"
+      fi
+      mv "$env_tmp" "$env_file"
+      chmod 600 "$env_file"
+    done <<<"$server_names"
+  fi
+
+  mcp_path="${PI_AGENT_DIR}/mcp.json"
+  [[ ! -L "$mcp_path" ]] || die "Pi MCP config path must not be a symlink: ${mcp_path}"
+  [[ ! -e "$mcp_path" || -f "$mcp_path" ]] || die "Pi MCP config path must be a regular file when present: ${mcp_path}"
+  mcp_tmp="$(mktemp "${PI_AGENT_DIR}/.mcp.XXXXXX")" || die "failed to create temporary Pi MCP config"
+  chmod 600 "$mcp_tmp"
+  jq --arg root "$CAPABILITIES_ROOT" '{
+    servers: ((.mcp.servers // {}) | with_entries(.value = {
+      command: .value.command,
+      args: (.value.args // []),
+      envFile: ($root + "/mcp-" + .key + "/env")
+    }))
+  }' "$CAPABILITY_MANIFEST_PATH" >"$mcp_tmp" \
+    || die "failed to generate Pi mcp.json"
+  jq empty "$mcp_tmp" >/dev/null || die "generated Pi mcp.json is invalid"
+  mv "$mcp_tmp" "$mcp_path"
+  chmod 600 "$mcp_path"
 }
 
 apply_github_netrc() {
@@ -326,6 +404,7 @@ main() {
   apply_env_wrappers
   apply_github_netrc
   apply_pi_settings
+  apply_mcp_config
   export PATH="${SHIMS_ROOT}:${PATH}"
 
   log "capability manifest loaded"
