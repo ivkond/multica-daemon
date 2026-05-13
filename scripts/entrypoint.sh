@@ -78,6 +78,11 @@ case "$normalized_workspaces_root" in
     ;;
 esac
 
+[[ ! -L /data/capabilities ]] || die "capabilities path must not be a symlink"
+[[ ! -e /data/capabilities || -d /data/capabilities ]] || die "capabilities path must be a directory"
+[[ ! -L /data/capability-shims ]] || die "capability shims path must not be a symlink"
+[[ ! -e /data/capability-shims || -d /data/capability-shims ]] || die "capability shims path must be a directory"
+
 mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR" "/data/capabilities" "/data/capability-shims"
 chmod 700 "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR" "/data/capabilities" "/data/capability-shims"
 [[ -w "$HOME" ]] || die "HOME is not writable"
