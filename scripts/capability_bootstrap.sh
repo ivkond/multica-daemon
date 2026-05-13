@@ -82,6 +82,24 @@ validate_manifest() {
   done < <(jq -r '.. | strings | select(startswith("secret:"))' "$CAPABILITY_MANIFEST_PATH")
 }
 
+apply_required_cli_checks() {
+  local command_name
+  local required_commands
+
+  jq -e '(.cli.required // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.required entries must be strings"
+
+  required_commands="$(jq -r '.cli.required[]? // empty' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .cli.required entries"
+
+  while IFS= read -r command_name; do
+    command_name="${command_name%$'\r'}"
+    [[ -n "$command_name" ]] || continue
+    validate_command_name "$command_name"
+    command -v "$command_name" >/dev/null 2>&1 || die "declared CLI is not available on PATH: ${command_name}"
+  done <<<"$required_commands"
+}
+
 load_manifest() {
   local manifest_dir
   local tmp_manifest
@@ -131,6 +149,7 @@ main() {
   fi
 
   validate_manifest
+  apply_required_cli_checks
 
   log "capability manifest loaded"
 }
