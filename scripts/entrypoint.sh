@@ -59,7 +59,7 @@ fi
 export HOME="/data/home"
 export CODEX_HOME="$DEFAULT_CODEX_HOME"
 export OPENCODE_HOME="$DEFAULT_OPENCODE_HOME"
-export PI_CODING_AGENT_DIR="$DEFAULT_PI_CODING_AGENT_DIR"
+export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-$DEFAULT_PI_CODING_AGENT_DIR}"
 export MULTICA_WORKSPACES_ROOT="${MULTICA_WORKSPACES_ROOT}"
 
 normalized_workspaces_root="$(realpath -m -- "$MULTICA_WORKSPACES_ROOT")"
@@ -78,7 +78,7 @@ case "$normalized_workspaces_root" in
     ;;
 esac
 
-mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "$PI_CODING_AGENT_DIR"
+mkdir -p "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR"
 chmod 700 "$HOME" "$MULTICA_WORKSPACES_ROOT" "$CODEX_HOME" "$OPENCODE_HOME" "/data/pi" "$PI_CODING_AGENT_DIR"
 [[ -w "$HOME" ]] || die "HOME is not writable"
 [[ -w "$MULTICA_WORKSPACES_ROOT" ]] || die "MULTICA_WORKSPACES_ROOT is not writable"
@@ -129,6 +129,49 @@ extract_secret() {
   '
 }
 
+declare -a INFISICAL_EXPORTED_SECRET_NAMES=()
+
+export_infisical_secrets_for_bootstrap() {
+  local rows key value_b64 value
+
+  if ! rows="$(printf '%s' "$infisical_response" | jq -r '
+    def env_secret_rows:
+      if type == "object" then
+        to_entries[] | select(.value != null) | [.key, (.value | tostring | @base64)] | @tsv
+      elif type == "array" then
+        .[] | [(.key? // .secretKey? // .name? // empty), (.value? // .secretValue? // empty)] | select(.[0] != "" and .[1] != null) | [.[0], (.[1] | tostring | @base64)] | @tsv
+      else
+        empty
+      end;
+    env_secret_rows
+  ')"; then
+    die "Infisical export response is not valid JSON"
+  fi
+
+  if [[ -n "$rows" ]]; then
+    while IFS=$'\t' read -r key value_b64; do
+      key="${key%$'\r'}"
+      value_b64="${value_b64%$'\r'}"
+      [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+      [[ -z "${!key:-}" ]] || continue
+      if ! value="$(printf '%s' "$value_b64" | base64 -d)"; then
+        die "failed to decode Infisical secret value for ${key}"
+      fi
+      printf -v "$key" '%s' "$value"
+      export "$key"
+      INFISICAL_EXPORTED_SECRET_NAMES+=("$key")
+    done <<<"$rows"
+  fi
+}
+
+unset_infisical_bootstrap_secrets() {
+  local name
+  for name in "${INFISICAL_EXPORTED_SECRET_NAMES[@]}"; do
+    unset "$name"
+  done
+  INFISICAL_EXPORTED_SECRET_NAMES=()
+}
+
 if ! MULTICA_TOKEN_FROM_SECRET_STORE="$(printf '%s' "$infisical_response" | extract_secret "MULTICA_TOKEN" "multica_token")"; then
   die "Infisical export response is not valid JSON"
 fi
@@ -141,6 +184,8 @@ fi
 if ! GITHUB_TOKEN_FROM_SECRET_STORE="$(printf '%s' "$infisical_response" | extract_secret "GITHUB_TOKEN" "github_token")"; then
   die "Infisical export response is not valid JSON"
 fi
+
+export_infisical_secrets_for_bootstrap
 
 [[ -n "$MULTICA_TOKEN_FROM_SECRET_STORE" ]] || die "Infisical secret is missing MULTICA_TOKEN"
 if [[ "$AGENT" == "codex" && -z "$CODEX_AUTH_JSON_B64_FROM_SECRET_STORE" ]]; then
@@ -184,6 +229,11 @@ configure_github_credentials() {
 configure_github_credentials "$GITHUB_TOKEN_FROM_SECRET_STORE"
 unset GITHUB_TOKEN_FROM_SECRET_STORE
 unset GITHUB_TOKEN
+
+log "running capability bootstrap"
+/usr/local/bin/capability_bootstrap.sh
+export PATH="/data/capability-shims:${PATH}"
+unset_infisical_bootstrap_secrets
 
 log "running multica setup"
 MULTICA_TOKEN_FROM_SECRET_STORE="$MULTICA_TOKEN_FROM_SECRET_STORE" /usr/local/bin/setup_multica.sh
