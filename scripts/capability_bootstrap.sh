@@ -68,10 +68,13 @@ validate_manifest() {
   require_object_or_absent '.mcp.servers'
   require_array_or_absent '.validate'
 
+  jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .cli.wrappers entries must be objects with a non-empty name"
+
   while IFS= read -r name; do
     name="${name%$'\r'}"
     validate_command_name "$name"
-  done < <(jq -r '.cli.wrappers[]?.name // empty' "$CAPABILITY_MANIFEST_PATH")
+  done < <(jq -r '.cli.wrappers[]?.name' "$CAPABILITY_MANIFEST_PATH")
 
   while IFS= read -r ref; do
     ref="${ref%$'\r'}"
