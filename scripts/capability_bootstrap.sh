@@ -129,6 +129,8 @@ validate_manifest() {
     || die "manifest .pi.extensions entries must be strings"
   jq -e '(.validate // []) | all(.[]; type == "array" and length > 0 and all(.[]; type == "string"))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .validate entries must be non-empty arrays of strings"
+  jq -e '(.validate // []) | all(.[]; all(.[]; (test("[\u0000-\u001F]") | not)))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .validate entries must not contain control characters"
 
   jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0) and (.target | type == "string" and startswith("/")) and ((.env // {}) | type == "object") and ((.env // {}) | to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:")))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .cli.wrappers entries must be objects with a non-empty name, absolute target, and env object containing secret refs"
@@ -373,7 +375,7 @@ run_validation_commands() {
       validation_args[$arg_index]="${validation_args[$arg_index]%$'\r'}"
     done
 
-    "${validation_args[@]}" >/dev/null || die "capability validation command failed at index ${index}"
+    "${validation_args[@]}" >/dev/null 2>&1 || die "capability validation command failed at index ${index}"
   done
 }
 
