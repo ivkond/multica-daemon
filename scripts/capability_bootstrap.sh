@@ -7,6 +7,21 @@ readonly SHIMS_ROOT="/data/capability-shims"
 readonly PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-/data/pi/agent}}"
 readonly CAPABILITY_MANIFEST_PATH="${CAPABILITY_MANIFEST_PATH:-/data/capabilities/manifest.json}"
 
+declare -a CLEANUP_TEMP_FILES=()
+
+cleanup_temp_files() {
+  local temp_file
+  for temp_file in "${CLEANUP_TEMP_FILES[@]}"; do
+    [[ -n "$temp_file" ]] && rm -f -- "$temp_file"
+  done
+}
+
+register_temp_file() {
+  CLEANUP_TEMP_FILES+=("$1")
+}
+
+trap cleanup_temp_files EXIT
+
 die() {
   printf 'capability_bootstrap: %s\n' "$1" >&2
   exit 1
@@ -254,7 +269,7 @@ apply_pi_settings() {
 }
 
 apply_mcp_config() {
-  local server_count server_names server server_dir env_file env_tmp env_entries key ref value
+  local server_count server_names server mcp_root server_dir env_file env_tmp env_entries key ref value
   local command_name mcp_path mcp_tmp
 
   server_count="$(jq -r '(.mcp.servers // {}) | length' "$CAPABILITY_MANIFEST_PATH")" \
@@ -263,8 +278,11 @@ apply_mcp_config() {
 
   validate_pi_agent_dir
   [[ ! -L "$CAPABILITIES_ROOT" ]] || die "capabilities root must not be a symlink: ${CAPABILITIES_ROOT}"
-  mkdir -p "$CAPABILITIES_ROOT" "$PI_AGENT_DIR"
-  chmod 700 "$CAPABILITIES_ROOT" "$PI_AGENT_DIR"
+  mcp_root="${CAPABILITIES_ROOT}/mcp"
+  [[ ! -L "$mcp_root" ]] || die "MCP root directory must not be a symlink: ${mcp_root}"
+  [[ ! -e "$mcp_root" || -d "$mcp_root" ]] || die "MCP root path must be a directory: ${mcp_root}"
+  mkdir -p "$mcp_root" "$PI_AGENT_DIR"
+  chmod 700 "$CAPABILITIES_ROOT" "$mcp_root" "$PI_AGENT_DIR"
 
   server_names="$(jq -r '(.mcp.servers // {}) | keys[]' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read manifest .mcp.servers names"
@@ -276,7 +294,7 @@ apply_mcp_config() {
         || die "failed to read MCP server command: ${server}"
       validate_safe_command_token "MCP server command" "$command_name"
 
-      server_dir="${CAPABILITIES_ROOT}/mcp-${server}"
+      server_dir="${mcp_root}/${server}"
       env_file="${server_dir}/env"
       [[ ! -L "$server_dir" ]] || die "MCP server directory must not be a symlink: ${server_dir}"
       [[ ! -e "$server_dir" || -d "$server_dir" ]] || die "MCP server path must be a directory: ${server_dir}"
@@ -286,11 +304,14 @@ apply_mcp_config() {
       [[ ! -e "$env_file" || -f "$env_file" ]] || die "MCP env file must be a regular file when present: ${env_file}"
 
       env_tmp="$(mktemp "${server_dir}/.env.XXXXXX")" || die "failed to create temporary MCP env file for server: ${server}"
+      register_temp_file "$env_tmp"
       chmod 600 "$env_tmp"
       env_entries="$(jq -r --arg server "$server" '.mcp.servers[$server].env // {} | to_entries[] | [.key, .value] | @tsv' "$CAPABILITY_MANIFEST_PATH")" \
         || die "failed to read MCP env entries for server: ${server}"
       if [[ -n "$env_entries" ]]; then
         while IFS=$'\t' read -r key ref; do
+          key="${key%$'\r'}"
+          ref="${ref%$'\r'}"
           [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "invalid env name for MCP server ${server}: ${key}"
           value="$(resolve_secret_ref "$ref")"
           printf 'export %s=%s\n' "$key" "$(shell_quote "$value")" >>"$env_tmp"
@@ -305,12 +326,13 @@ apply_mcp_config() {
   [[ ! -L "$mcp_path" ]] || die "Pi MCP config path must not be a symlink: ${mcp_path}"
   [[ ! -e "$mcp_path" || -f "$mcp_path" ]] || die "Pi MCP config path must be a regular file when present: ${mcp_path}"
   mcp_tmp="$(mktemp "${PI_AGENT_DIR}/.mcp.XXXXXX")" || die "failed to create temporary Pi MCP config"
+  register_temp_file "$mcp_tmp"
   chmod 600 "$mcp_tmp"
   jq --arg root "$CAPABILITIES_ROOT" '{
     servers: ((.mcp.servers // {}) | with_entries(.value = {
       command: .value.command,
       args: (.value.args // []),
-      envFile: ($root + "/mcp-" + .key + "/env")
+      envFile: ($root + "/mcp/" + .key + "/env")
     }))
   }' "$CAPABILITY_MANIFEST_PATH" >"$mcp_tmp" \
     || die "failed to generate Pi mcp.json"
