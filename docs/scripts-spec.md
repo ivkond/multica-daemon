@@ -1,6 +1,6 @@
 # Scripts Specification
 
-Date: 2026-05-07
+Date: 2026-05-08
 
 ## File Layout
 
@@ -22,7 +22,7 @@ All scripts must:
 - fail-fast with actionable error messages;
 - avoid printing secret values;
 - avoid interactive prompts;
-- avoid runtime package installation from the network, except Vault fetch and service health calls.
+- avoid runtime package installation from the network, except Infisical export and service health calls.
 
 ## `entrypoint.sh`
 
@@ -30,29 +30,33 @@ Responsibility: runtime orchestration.
 
 Steps:
 
-1. Validate required runtime env.
+1. Validate required runtime env, including that `AGENT` matches image-baked `MULTICA_IMAGE_AGENT`.
 2. Export runtime paths:
    ```bash
    export HOME=/data/home
    export MULTICA_WORKSPACES_ROOT="${MULTICA_WORKSPACES_ROOT}"
    export CODEX_HOME=/data/codex
    export OPENCODE_HOME=/data/opencode
+   export PI_CODING_AGENT_DIR=/data/pi/agent
    ```
-3. Create runtime directories.
-4. Fetch Vault secret with retry.
-5. Export normalized secret values for child setup scripts.
-6. Call `setup_multica.sh`.
-7. Call `setup_agent.sh "$AGENT"`.
-8. Start health proxy on `$PORT`.
-9. Execute `multica daemon start --foreground`.
+3. Normalize `MULTICA_WORKSPACES_ROOT` and reject `/data`, `/data/home`, `/data/codex`, `/data/opencode`, `/data/pi`, `/data/pi/agent`, and descendants of those runtime state paths.
+4. Create runtime directories.
+5. Fetch Infisical secret with retry.
+6. Export normalized secret values for child setup scripts.
+7. Call `setup_multica.sh`.
+8. Call `setup_agent.sh "$AGENT"`.
+9. Start health proxy on `$PORT`.
+10. Execute `multica daemon start --foreground`.
 
 Required env:
 
 ```text
 AGENT
-VAULT_ADDR
-VAULT_TOKEN
-VAULT_SECRET_PATH
+MULTICA_IMAGE_AGENT
+INFISICAL_TOKEN
+INFISICAL_PROJECT_ID
+INFISICAL_ENV
+INFISICAL_SECRET_PATH
 MULTICA_SERVER_URL
 MULTICA_APP_URL
 MULTICA_DAEMON_ID
@@ -62,18 +66,26 @@ MULTICA_WORKSPACES_ROOT
 PORT
 ```
 
+`entrypoint.sh` must fail clearly before Infisical fetch when `MULTICA_IMAGE_AGENT` is missing or differs from runtime `AGENT`.
+
+Optional env:
+
+```text
+INFISICAL_API_URL
+```
+
 Supported agents:
 
 ```text
 codex
 opencode
+pi
 ```
 
-Vault fetch:
+Infisical fetch:
 
-- use `curl`;
+- use `infisical export --format=json`;
 - parse with `jq`;
-- support KV v2 response at `.data.data`;
 - retry 3 times;
 - do not log raw response;
 - expose only required normalized shell variables.
@@ -81,11 +93,15 @@ Vault fetch:
 Normalized variables:
 
 ```text
-MULTICA_TOKEN_FROM_VAULT
-CODEX_AUTH_JSON_B64_FROM_VAULT
+MULTICA_TOKEN_FROM_SECRET_STORE
+CODEX_AUTH_JSON_B64_FROM_SECRET_STORE
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
+GITHUB_TOKEN_FROM_SECRET_STORE
 ```
 
-`CODEX_AUTH_JSON_B64_FROM_VAULT` is required only for `AGENT=codex`.
+`CODEX_AUTH_JSON_B64_FROM_SECRET_STORE` is sourced from Infisical field `CODEX_AUTH_JSON_B64` and is required only for `AGENT=codex`.
+`PI_AUTH_JSON_B64_FROM_SECRET_STORE` is sourced from Infisical field `PI_AUTH_JSON_B64` and is required only for `AGENT=pi`.
+`GITHUB_TOKEN_FROM_SECRET_STORE` is optional and used only to create managed `/data/home/.netrc` and `/data/home/.git-credentials` files for private GitHub repo clones.
 
 Health proxy:
 
@@ -109,28 +125,28 @@ Inputs:
 ```text
 MULTICA_SERVER_URL
 MULTICA_APP_URL
-MULTICA_TOKEN_FROM_VAULT
+MULTICA_TOKEN_FROM_SECRET_STORE
 ```
 
 Steps:
 
-1. Verify `multica --version`.
-2. Configure server URL:
+1. Copy `MULTICA_TOKEN_FROM_SECRET_STORE` to local `multica_token`.
+2. Unset exported `MULTICA_TOKEN_FROM_SECRET_STORE` before invoking child processes.
+3. Verify `multica --version`.
+4. Configure server URL:
    ```bash
    multica config set server_url "$MULTICA_SERVER_URL"
    ```
-3. Configure app URL:
+5. Configure app URL:
    ```bash
    multica config set app_url "$MULTICA_APP_URL"
    ```
-4. Authenticate with token:
+6. Authenticate with token:
    ```bash
-   multica login --token "$MULTICA_TOKEN_FROM_VAULT"
+   multica login --token "$multica_token"
    ```
-5. Verify:
-   ```bash
-   multica auth status
-   ```
+7. Unset local `multica_token`.
+8. Treat successful `multica login --token` completion as the startup authentication gate. Do not run `multica auth status` in startup logs because it can expose a token prefix.
 
 This script does not start the daemon.
 
@@ -143,6 +159,7 @@ Supported values:
 ```text
 codex
 opencode
+pi
 ```
 
 Unsupported values fail-fast.
@@ -159,7 +176,7 @@ Inputs:
 
 ```text
 CODEX_HOME=/data/codex
-CODEX_AUTH_JSON_B64_FROM_VAULT
+CODEX_AUTH_JSON_B64_FROM_SECRET_STORE
 ```
 
 Rules:
@@ -208,6 +225,31 @@ Validation:
 opencode --version
 ```
 
+### Pi
+
+Inputs:
+
+```text
+PI_CODING_AGENT_DIR=/data/pi/agent
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
+```
+
+Rules:
+
+- create `/data/pi` with `chmod 700`;
+- create `PI_CODING_AGENT_DIR` with `chmod 700`;
+- write `PI_CODING_AGENT_DIR/auth.json` only when missing;
+- validate decoded Pi auth JSON before moving it into place;
+- preserve existing `auth.json`;
+- set `auth.json` permission to `600`;
+- do not run interactive `pi` or `/login`.
+
+Validation:
+
+```bash
+pi --version
+```
+
 ## Logging Contract
 
 Allowed startup log fields:
@@ -221,17 +263,20 @@ multica_version
 node_version
 codex_version
 opencode_version
-vault_secret_path
+pi_version
+infisical_secret_path
 workspace_root
 ```
 
 Forbidden log fields:
 
 ```text
-VAULT_TOKEN
-MULTICA_TOKEN_FROM_VAULT
-CODEX_AUTH_JSON_B64_FROM_VAULT
+INFISICAL_TOKEN
+MULTICA_TOKEN_FROM_SECRET_STORE
+CODEX_AUTH_JSON_B64_FROM_SECRET_STORE
+PI_AUTH_JSON_B64_FROM_SECRET_STORE
+GITHUB_TOKEN_FROM_SECRET_STORE
 auth.json content
-raw Vault response
+raw Infisical export response
 API keys
 ```

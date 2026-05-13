@@ -6,10 +6,9 @@ These ideas are outside the MVP. They can turn one reliable daemon runtime into 
 
 ## 1. More Agents
 
-Candidate agents:
+Candidate agents beyond Codex, OpenCode, and Pi:
 
 - `kilocode`
-- `pi`
 - `deepseek-cli`
 - `mistral-vibe`
 - `cursor`
@@ -20,12 +19,12 @@ Definition of Done:
 - pinned version variable for each agent;
 - `setup_agent.sh <agent>` support;
 - `<agent> --version` startup validation;
-- Vault secret shape example if the agent needs credentials;
+- Infisical secret shape example if the agent needs credentials;
 - README deployment example for at least one additional agent.
 
 ## 2. Secret Provider Options
 
-Add secret provider abstraction while keeping Vault compatibility.
+Add secret provider abstraction while keeping Infisical compatibility.
 
 Candidate providers:
 
@@ -40,7 +39,7 @@ Candidate providers:
 Definition of Done:
 
 - `SECRETS_PROVIDER` selects implementation;
-- Vault remains the default;
+- Infisical remains the default;
 - all providers normalize to the same internal fields;
 - secret values remain redacted in logs;
 - docs include provider setup examples.
@@ -55,7 +54,7 @@ Definition of Done:
 - `CODEX_AUTH_MODE=api_key` allows `OPENAI_API_KEY` or `CODEX_API_KEY`;
 - conflicting auth settings fail-fast;
 - README explains billing implications;
-- Vault secret shape includes API key mode.
+- Infisical secret shape includes API key mode.
 
 ## 4. OpenCode Provider Profiles
 
@@ -128,13 +127,15 @@ docker run --rm multica-daemon:codex multica --version
 docker run --rm multica-daemon:codex codex --version
 docker run --rm multica-daemon:opencode multica --version
 docker run --rm multica-daemon:opencode opencode --version
+docker run --rm multica-daemon:pi multica --version
+docker run --rm multica-daemon:pi pi --version
 ```
 
 Definition of Done:
 
 - no-secret checks run in CI;
 - runtime checks are separated from build checks;
-- CI matrix covers `AGENT=codex` and `AGENT=opencode`;
+- CI matrix covers `AGENT=codex`, `AGENT=opencode`, and `AGENT=pi` with `PI_VERSION=0.74.0`;
 - optional shell test framework is introduced only after explicit decision.
 
 ## 8. Runtime Diagnostics
@@ -179,8 +180,8 @@ Before a larger runtime fleet, run a focused security review.
 
 Definition of Done:
 
-- threat model covers Vault token, Multica token, Codex OAuth credentials, workspaces, and agent shell access;
+- threat model covers Infisical token, Multica token, Codex OAuth credentials, workspaces, and agent shell access;
 - logs are checked for secret leakage;
-- each runtime has a unique daemon id, Vault path, and volume;
+- each runtime has a unique daemon id, Infisical path, and volume;
 - replicas are disabled for stateful runtime services;
 - incident response steps are documented and rehearsed.
