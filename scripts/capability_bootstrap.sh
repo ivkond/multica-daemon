@@ -127,6 +127,8 @@ validate_manifest() {
     || die "manifest .pi.skills entries must be strings"
   jq -e '(.pi.extensions // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .pi.extensions entries must be strings"
+  jq -e '(.validate // []) | all(.[]; type == "array" and length > 0 and all(.[]; type == "string"))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
+    || die "manifest .validate entries must be non-empty arrays of strings"
 
   jq -e '(.cli.wrappers // []) | all(.[]; type == "object" and (.name | type == "string" and length > 0) and (.target | type == "string" and startswith("/")) and ((.env // {}) | type == "object") and ((.env // {}) | to_entries | all(.[]; (.key | type == "string") and (.value | type == "string" and startswith("secret:")))))' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .cli.wrappers entries must be objects with a non-empty name, absolute target, and env object containing secret refs"
@@ -347,6 +349,34 @@ apply_mcp_config() {
   chmod 600 "$mcp_path"
 }
 
+run_validation_commands() {
+  local count index length validation_args_tmp arg_index
+  local -a validation_args
+
+  count="$(jq -r '(.validate // []) | length' "$CAPABILITY_MANIFEST_PATH")" \
+    || die "failed to read manifest .validate count"
+  [[ "$count" != "0" ]] || return 0
+
+  for ((index = 0; index < count; index++)); do
+    length="$(jq -r --argjson i "$index" '.validate[$i] | length' "$CAPABILITY_MANIFEST_PATH")" \
+      || die "failed to read manifest .validate command length at index ${index}"
+    [[ "$length" -gt 0 ]] || die "validate[${index}] must not be empty"
+
+    validation_args_tmp="$(mktemp)" || die "failed to create temporary validation args file"
+    register_temp_file "$validation_args_tmp"
+    jq -r --argjson i "$index" '.validate[$i][]' "$CAPABILITY_MANIFEST_PATH" >"$validation_args_tmp" \
+      || die "failed to parse manifest .validate command at index ${index}"
+    mapfile -t validation_args <"$validation_args_tmp" \
+      || die "failed to read manifest .validate command at index ${index}"
+    rm -f -- "$validation_args_tmp"
+    for arg_index in "${!validation_args[@]}"; do
+      validation_args[$arg_index]="${validation_args[$arg_index]%$'\r'}"
+    done
+
+    "${validation_args[@]}" >/dev/null || die "capability validation command failed at index ${index}"
+  done
+}
+
 apply_github_netrc() {
   local mode token_ref token netrc_path netrc_tmp
   mode="$(jq -r '.auth.github.mode // empty' "$CAPABILITY_MANIFEST_PATH")" \
@@ -434,8 +464,9 @@ main() {
   apply_pi_settings
   apply_mcp_config
   export PATH="${SHIMS_ROOT}:${PATH}"
+  run_validation_commands
 
-  log "capability manifest loaded"
+  log "capability bootstrap completed"
 }
 
 main "$@"
