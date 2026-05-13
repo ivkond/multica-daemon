@@ -4,7 +4,7 @@ set +x
 
 readonly CAPABILITIES_ROOT="/data/capabilities"
 readonly SHIMS_ROOT="/data/capability-shims"
-readonly PI_AGENT_DIR="${PI_AGENT_DIR:-/data/pi/agent}"
+readonly PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_AGENT_DIR:-/data/pi/agent}}"
 readonly CAPABILITY_MANIFEST_PATH="${CAPABILITY_MANIFEST_PATH:-/data/capabilities/manifest.json}"
 
 die() {
