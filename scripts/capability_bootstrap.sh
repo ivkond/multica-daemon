@@ -75,7 +75,7 @@ resolve_secret_ref() {
 
 shell_quote() {
   local value="$1"
-  printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+  printf '%q' "$value"
 }
 
 validate_safe_command_token() {
@@ -404,6 +404,7 @@ apply_github_netrc() {
   netrc_tmp="$(mktemp "${HOME}/.netrc.XXXXXX")" || die "failed to create temporary GitHub netrc"
   chmod 600 "$netrc_tmp"
   {
+    printf '# managed by multica-daemon entrypoint\n'
     printf 'machine github.com\n'
     printf '  login x-access-token\n'
     printf '  password %s\n' "$token"
