@@ -228,11 +228,11 @@ configure_github_credentials() {
 
 configure_github_credentials "$GITHUB_TOKEN_FROM_SECRET_STORE"
 unset GITHUB_TOKEN_FROM_SECRET_STORE
-unset GITHUB_TOKEN
 
 log "running capability bootstrap"
 /usr/local/bin/capability_bootstrap.sh
 export PATH="/data/capability-shims:${PATH}"
+unset GITHUB_TOKEN
 unset_infisical_bootstrap_secrets
 
 log "running multica setup"
