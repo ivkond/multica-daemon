@@ -47,6 +47,17 @@ validate_secret_ref() {
   [[ "$ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid secret reference: ${ref}"
 }
 
+resolve_secret_ref() {
+  local ref="$1"
+  local name
+  validate_secret_ref "$ref"
+  name="${ref#secret:}"
+  if [[ -z "${!name:-}" ]]; then
+    die "required secret environment variable is empty: ${name}"
+  fi
+  printf '%s' "${!name}"
+}
+
 validate_command_name() {
   local name="$1"
   [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid wrapper command name: ${name}"
