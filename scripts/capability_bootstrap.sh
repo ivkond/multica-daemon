@@ -83,21 +83,24 @@ validate_manifest() {
 }
 
 apply_required_cli_checks() {
+  local command_json
   local command_name
   local required_commands
 
   jq -e '(.cli.required // []) | all(.[]; type == "string")' "$CAPABILITY_MANIFEST_PATH" >/dev/null \
     || die "manifest .cli.required entries must be strings"
 
-  required_commands="$(jq -r '.cli.required[]? // empty' "$CAPABILITY_MANIFEST_PATH")" \
+  required_commands="$(jq -c '.cli.required[]?' "$CAPABILITY_MANIFEST_PATH")" \
     || die "failed to read manifest .cli.required entries"
 
-  while IFS= read -r command_name; do
-    command_name="${command_name%$'\r'}"
-    [[ -n "$command_name" ]] || continue
-    validate_command_name "$command_name"
-    command -v "$command_name" >/dev/null 2>&1 || die "declared CLI is not available on PATH: ${command_name}"
-  done <<<"$required_commands"
+  if [[ -n "$required_commands" ]]; then
+    while IFS= read -r command_json; do
+      command_name="$(jq -r . <<<"$command_json")"
+      command_name="${command_name%$'\r'}"
+      validate_command_name "$command_name"
+      command -v "$command_name" >/dev/null 2>&1 || die "declared CLI is not available on PATH: ${command_name}"
+    done <<<"$required_commands"
+  fi
 }
 
 load_manifest() {
