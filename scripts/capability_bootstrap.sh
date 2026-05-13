@@ -44,7 +44,7 @@ require_array_or_absent() {
 
 validate_secret_ref() {
   local ref="$1"
-  [[ "$ref" =~ ^secret:[A-Z_][A-Z0-9_]*$ ]] || die "invalid secret reference: ${ref}"
+  [[ "$ref" =~ ^secret:[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid secret reference: ${ref}"
 }
 
 validate_command_name() {
@@ -54,10 +54,7 @@ validate_command_name() {
 }
 
 validate_manifest() {
-  local version
-  version="$(jq -r '.version // empty' "$CAPABILITY_MANIFEST_PATH")"
-  version="${version%$'\r'}"
-  [[ "$version" == "1" ]] || die "capability manifest version must be 1"
+  jq -e '.version == 1' "$CAPABILITY_MANIFEST_PATH" >/dev/null || die "capability manifest version must be 1"
 
   require_object_or_absent '.pi'
   require_array_or_absent '.pi.packages'
