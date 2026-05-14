@@ -34,14 +34,14 @@ The container starts as a small orchestrator:
 5. Configures Multica CLI with your server and app URLs.
 6. Configures the selected agent.
 7. Starts a thin health proxy on `$PORT`.
-8. Runs `multica daemon start --foreground`.
+8. Runs `multica daemon start --foreground` under `tini`, so orphaned child processes from agent CLIs and build/test tools are reaped instead of accumulating as zombies.
 
 Your Multica backend and frontend can live anywhere: Railway, a VPS, Vercel, another cloud, or your own infrastructure. The daemon only needs reachable URLs.
 
 ## Runtime Files
 
-- `Dockerfile` builds the selected `codex`, `opencode`, or `pi` runtime image and installs the Infisical CLI.
-- `scripts/entrypoint.sh` validates environment, prepares `/data`, fetches Infisical secrets, runs setup scripts, starts the health proxy, and execs the daemon.
+- `Dockerfile` builds the selected `codex`, `opencode`, or `pi` runtime image, installs the Infisical CLI, and uses `tini` as PID 1 for zombie-process reaping.
+- `scripts/entrypoint.sh` validates environment, prepares `/data`, fetches Infisical secrets, runs setup scripts, starts the health proxy, and execs the daemon as a child of `tini`.
 - `scripts/setup_multica.sh` configures Multica CLI URLs and token auth.
 - `scripts/setup_agent.sh` configures Codex, OpenCode, or Pi runtime state.
 - `scripts/health_proxy.py` exposes Railway `/health` on `$PORT`.

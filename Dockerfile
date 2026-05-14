@@ -41,6 +41,7 @@ RUN set -eux; \
     jq \
     python3 \
     ripgrep \
+    tini \
     tar \
     unzip \
     xz-utils; \
@@ -118,4 +119,4 @@ ENV CODEX_VERSION=$CODEX_VERSION
 ENV OPENCODE_VERSION=$OPENCODE_VERSION
 ENV PI_VERSION=$PI_VERSION
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
